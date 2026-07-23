@@ -248,22 +248,9 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
     memset(&s_session, 0, sizeof(s_session));
     s_session.peer_addr = *peer_addr;
 
-    struct ble_gap_conn_params conn_params = {0};
-    conn_params.scan_itvl = 0x0010;
-    conn_params.scan_window = 0x0010;
-    conn_params.itvl_min = 24;
-    conn_params.itvl_max = 40;
-    conn_params.latency = 0;
-    conn_params.supervision_timeout = 256;
-
-    int rc = ble_gap_ext_connect(s_own_addr_type, peer_addr, 30000,
-                                 BLE_GAP_LE_PHY_CODED_MASK, //BLE_GAP_LE_PHY_1M_MASK 
-                                  &conn_params,   /* 1M params */
-                                  NULL,           
-                                  &conn_params,   /* reuse same params for coded */
-                                  gatt_gap_event_cb, NULL);
+    int rc = ble_gap_connect(s_own_addr_type, peer_addr, 30000, NULL,  gatt_gap_event_cb, NULL);
     if (rc != 0) {
-        ESP_LOGE(TAG, "ble_gap_ext_connect failed: %d", rc);
+        ESP_LOGE(TAG, "ble_gap_connect failed: %d", rc);
         end_session();
     }
     return rc;
