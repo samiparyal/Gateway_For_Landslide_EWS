@@ -102,7 +102,7 @@ char *json_builder_build_gatt(const ble_addr_t *addr,
         cJSON_AddNumberToObject(root, "gyro_x", data->gyro_x);
         cJSON_AddNumberToObject(root, "gyro_y", data->gyro_y);
         cJSON_AddNumberToObject(root, "gyro_z", data->gyro_z);
-        cJSON_AddNumberToObject(root, "imu_sample_idx", data->imu_sample_idx);
+        cJSON_AddNumberToObject(root, "imu_timestamp_ms", data->imu_timestamp_ms);
         cJSON_AddNumberToObject(root, "imu_is_hist_burst", data->imu_is_hist_burst);
     }
 

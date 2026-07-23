@@ -59,6 +59,11 @@ static uint16_t le16_to_uint16(const uint8_t *p) //little endian two consecutive
     return (uint16_t)(p[0] | ((uint16_t)p[1] << 8)); 
 }
 
+static uint32_t le32_to_uint32(const uint8_t *p)
+{
+    return (uint32_t)(p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24));
+}
+
 static void report(void)
 {
     char *json = json_builder_build_gatt(&s_session.peer_addr, &s_session.data);
@@ -100,7 +105,7 @@ static void handle_tilt_data_notify(struct os_mbuf *om)
 
 static void handle_raw_imu_notify(struct os_mbuf *om)
 {
-    uint8_t buf[19];
+    uint8_t buf[21];
     if (OS_MBUF_PKTLEN(om) < sizeof(buf)) {
         ESP_LOGW(TAG, "RawImuSample notify too short");
         return;
@@ -115,8 +120,8 @@ static void handle_raw_imu_notify(struct os_mbuf *om)
     s_session.data.gyro_z  = (int16_t)le16_to_uint16(&buf[10]);
     /* buf[12..15] duplicate TiltData's dev_x100/vel_x100 - not re-read here,
        TiltData is the authoritative source for those two fields */
-    s_session.data.imu_sample_idx = le16_to_uint16(&buf[16]);
-    s_session.data.imu_is_hist_burst = buf[18];
+    s_session.data.imu_timestamp_ms = le32_to_uint32(&buf[16]);
+    s_session.data.imu_is_hist_burst = buf[20];
     s_session.data.has_raw_imu = true;
     report();
 }
