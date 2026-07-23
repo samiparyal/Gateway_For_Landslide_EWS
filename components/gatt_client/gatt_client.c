@@ -207,6 +207,7 @@ static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg)
         if (event->connect.status == 0) {
             s_session.active = true;
             s_session.conn_handle = event->connect.conn_handle;
+            ble_gattc_exchange_mtu(event->connect.conn_handle, NULL, NULL);
             ble_gattc_disc_svc_by_uuid(event->connect.conn_handle,
                                         BLE_UUID16_DECLARE(GATT_LANDSLIDE_SVC_UUID),
                                         on_svc_disc, NULL);
@@ -242,17 +243,26 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
         return BLE_HS_EBUSY;
     }
 
-    /* the gateway scans continuously; NimBLE can't initiate a connection
-       while a discovery procedure is in progress; so stop it irst*/
     ble_gap_disc_cancel();
 
     memset(&s_session, 0, sizeof(s_session));
     s_session.peer_addr = *peer_addr;
 
-    int rc = ble_gap_connect(s_own_addr_type, peer_addr, 30000, NULL,
-                              gatt_gap_event_cb, NULL);
+    struct ble_gap_conn_params coded_conn_params = {0};
+    coded_conn_params.scan_itvl = 0x0010;
+    coded_conn_params.scan_window = 0x0010;
+    coded_conn_params.itvl_min = 24;  
+    coded_conn_params.itvl_max = 40;
+    coded_conn_params.latency = 0;
+    coded_conn_params.supervision_timeout = 256;
+
+    int rc = ble_gap_ext_connect(s_own_addr_type, peer_addr, 30000,
+                                  BLE_GAP_LE_PHY_CODED_MASK,
+                                  NULL, NULL,               /* no 1M/2M attempt */
+                                  &coded_conn_params,
+                                  gatt_gap_event_cb, NULL);
     if (rc != 0) {
-        ESP_LOGE(TAG, "ble_gap_connect failed: %d", rc);
+        ESP_LOGE(TAG, "ble_gap_ext_connect failed: %d", rc);
         end_session();
     }
     return rc;

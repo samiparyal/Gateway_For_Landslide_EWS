@@ -18,13 +18,20 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg);
 
 void gap_scan_start(uint8_t own_addr_type)
 {
-    struct ble_gap_disc_params disc_params = {0};
+    //struct ble_gap_disc_params disc_params = {0};
 
-    disc_params.passive = 1;
-    disc_params.itvl = disc_params.window = 0x0010; // 10ms
-    disc_params.filter_duplicates = 0; //for debugging
+    // disc_params.passive = 1;
+    // disc_params.itvl = disc_params.window = 0x0010; // 10ms
+    // disc_params.filter_duplicates = 0; //for debugging
 
-    int rc = ble_gap_disc(own_addr_type, BLE_HS_FOREVER, &disc_params, ble_gap_event_cb, NULL);
+    struct ble_gap_ext_disc_params coded_params = {0};
+    coded_params.passive = 1;
+    coded_params.itvl = coded_params.window = 0x0010;
+
+    int rc = ble_gap_ext_disc(own_addr_type, 0, 0, 0, 0, 0,
+                               NULL,            /* uncoded (1M) params - sensor no longer advertises here */
+                               &coded_params,
+                               ble_gap_event_cb, NULL);
     if (rc != 0) {
         ESP_LOGE(TAG, "ble_gap_disc failed: %d", rc);
         return;
@@ -122,7 +129,7 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
         return 0; /* not our device */
     }
 
-    if (g_gatt_connect_requested) {
+    if (g_gatt_connect_requested) {          
         g_gatt_connect_requested = false;
         gatt_client_connect(&event->disc.addr);
     }
