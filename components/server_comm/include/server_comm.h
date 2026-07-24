@@ -8,8 +8,7 @@ void server_comm_init(void);
 
 /*
  * feeding the raw command string/body received from the server
- * here (e.g. straight from an HTTP request body or a parsed JSON field).
- * Recognizes "connect" and sets g_gatt_connect_requested accordingly.
+ * here. Recognizes "connect" and sets g_gatt_connect_requested accordingly.
  */
 void server_comm_handle_command(const char *cmd_str);
 

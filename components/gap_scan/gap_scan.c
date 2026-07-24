@@ -123,7 +123,6 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
     }
 
     if (g_gatt_connect_requested) {
-        g_gatt_connect_requested = false;
         gatt_client_connect(&event->disc.addr);
     }
 

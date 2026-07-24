@@ -33,6 +33,17 @@ static uint8_t s_own_addr_type;
 static gatt_session_t s_session;
 static gatt_session_end_cb_t s_session_end_cb;
 
+/* dedup */
+static uint8_t s_last_alert_status[2];
+static bool s_has_last_alert_status;
+
+static uint8_t s_last_tilt_data[4];
+static bool s_has_last_tilt_data;
+
+/* excludes imu_timestamp_ms */
+static uint8_t s_last_raw_imu[17]; /* buf[0..15] (accel/gyro) + buf[20] (hist_burst) */
+static bool s_has_last_raw_imu;
+
 static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg);
 
 void gatt_client_init(uint8_t own_addr_type)
@@ -49,6 +60,9 @@ void gatt_client_set_session_end_cb(gatt_session_end_cb_t cb)
 static void end_session(void)
 {
     memset(&s_session, 0, sizeof(s_session));
+    s_has_last_alert_status = false;
+    s_has_last_tilt_data = false;
+    s_has_last_raw_imu = false;
     if (s_session_end_cb != NULL) {
         s_session_end_cb();
     }
@@ -85,7 +99,13 @@ static void handle_alert_status_notify(struct os_mbuf *om)
     s_session.data.alarm = buf[0];
     s_session.data.trigger = buf[1];
     s_session.data.has_alert_status = true;
-    report();
+
+    bool changed = !s_has_last_alert_status || memcmp(buf, s_last_alert_status, sizeof(buf)) != 0;
+    if (changed) {
+        memcpy(s_last_alert_status, buf, sizeof(buf));
+        s_has_last_alert_status = true;
+        report();
+    }
 }
 
 static void handle_tilt_data_notify(struct os_mbuf *om)
@@ -100,7 +120,13 @@ static void handle_tilt_data_notify(struct os_mbuf *om)
     s_session.data.dev_x100 = le16_to_uint16(&buf[0]);
     s_session.data.vel_x100 = le16_to_uint16(&buf[2]);
     s_session.data.has_tilt_data = true;
-    report();
+
+    bool changed = !s_has_last_tilt_data || memcmp(buf, s_last_tilt_data, sizeof(buf)) != 0;
+    if (changed) {
+        memcpy(s_last_tilt_data, buf, sizeof(buf));
+        s_has_last_tilt_data = true;
+        report();
+    }
 }
 
 static void handle_raw_imu_notify(struct os_mbuf *om)
@@ -123,7 +149,19 @@ static void handle_raw_imu_notify(struct os_mbuf *om)
     s_session.data.imu_timestamp_ms = le32_to_uint32(&buf[16]);
     s_session.data.imu_is_hist_burst = buf[20];
     s_session.data.has_raw_imu = true;
-    report();
+
+    /* compare accel/gyro (buf[0..15]) + hist_burst (buf[20]) only - timestamp
+       (buf[16..19]) is excluded, see s_last_raw_imu declaration */
+    uint8_t key[17];
+    memcpy(key, buf, 16);
+    key[16] = buf[20];
+
+    bool changed = !s_has_last_raw_imu || memcmp(key, s_last_raw_imu, sizeof(key)) != 0;
+    if (changed) {
+        memcpy(s_last_raw_imu, key, sizeof(key));
+        s_has_last_raw_imu = true;
+        report();
+    }
 }
 
 /*
@@ -247,6 +285,9 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
 
     memset(&s_session, 0, sizeof(s_session));
     s_session.peer_addr = *peer_addr;
+    s_has_last_alert_status = false;
+    s_has_last_tilt_data = false;
+    s_has_last_raw_imu = false;
 
     int rc = ble_gap_connect(s_own_addr_type, peer_addr, 30000, NULL,  gatt_gap_event_cb, NULL);
     if (rc != 0) {
