@@ -3,6 +3,7 @@
 #include <stdbool.h>
 
 extern bool g_gatt_connect_requested;
+extern bool hide_gatt_logs;
 
 void server_comm_init(void);
 

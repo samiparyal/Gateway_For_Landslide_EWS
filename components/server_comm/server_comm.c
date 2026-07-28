@@ -4,6 +4,8 @@
 
 static const char *TAG = "SERVER_COMM";
 
+bool hide_gatt_logs = true;  
+
 bool g_gatt_connect_requested = true; /* for testing use true */
 
 void server_comm_init(void)
@@ -21,6 +23,14 @@ void server_comm_handle_command(const char *cmd_str)
     }
     if (strcmp(cmd_str, "GATT_Connect") == 0) {
         g_gatt_connect_requested = true;
+    }
+    else if (strcmp(cmd_str, "Seedlink_On") == 0) 
+    {
+        hide_gatt_logs = true;
+    } 
+    else if (strcmp(cmd_str, "Seedlink_Off") == 0) 
+    {
+        hide_gatt_logs = false;
     }
 }
 

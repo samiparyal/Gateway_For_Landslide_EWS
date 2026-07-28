@@ -8,6 +8,8 @@
 #include "gap_scan.h"
 #include "server_comm.h"
 #include "gatt_client.h"
+#include "wifi_conn.h"
+#include "seedlink.h"
 
 #define TAG "BLE_APP"
 
@@ -56,6 +58,7 @@ void ble_app_on_sync_cb(void)
 
     s_own_addr_type = BLE_OWN_ADDR_RANDOM;
 
+    seedlink_init();  
     server_comm_init();
 
     gatt_client_init(s_own_addr_type);
@@ -79,6 +82,8 @@ void app_main(void)
         nvs_ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(nvs_ret);
+
+    wifi_conn_init();   
 
     esp_err_t ret = nimble_port_init();
     if(ret != ESP_OK) {

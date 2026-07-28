@@ -10,6 +10,7 @@ typedef struct MSEED_CONFIG
     char network[3];
     uint64_t start_time;
     uint16_t time_fract;
+    uint16_t rate_hz;    //actual sample rate, replaces hardcoded 100Hz
 } mseed_config_t;
 
 uint8_t *mseed_record(float *p_data, mseed_config_t *sp_cfg);

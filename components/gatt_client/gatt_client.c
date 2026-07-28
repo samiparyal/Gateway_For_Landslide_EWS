@@ -9,6 +9,8 @@
 #include "cJSON.h"
 #include "server_comm.h"
 #include "json_builder.h"
+#include "seedlink.h"
+#include <time.h>
 
 static const char *TAG = "GATT_CLIENT";
 
@@ -45,6 +47,12 @@ static uint8_t s_last_raw_imu[17]; /* buf[0..15] (accel/gyro) + buf[20] (hist_bu
 static bool s_has_last_raw_imu;
 
 static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg);
+
+//new: seedlink
+static imu_payload_t s_seedlink_payload;
+static uint16_t s_seedlink_idx = 0;
+static uint32_t s_seedlink_sequence = 1;
+
 
 void gatt_client_init(uint8_t own_addr_type)
 {
@@ -104,7 +112,9 @@ static void handle_alert_status_notify(struct os_mbuf *om)
     if (changed) {
         memcpy(s_last_alert_status, buf, sizeof(buf));
         s_has_last_alert_status = true;
-        report();
+        if (!hide_gatt_logs) {
+            report();
+        }
     }
 }
 
@@ -125,7 +135,9 @@ static void handle_tilt_data_notify(struct os_mbuf *om)
     if (changed) {
         memcpy(s_last_tilt_data, buf, sizeof(buf));
         s_has_last_tilt_data = true;
-        report();
+        if (!hide_gatt_logs) {
+            report();
+        }
     }
 }
 
@@ -150,6 +162,29 @@ static void handle_raw_imu_notify(struct os_mbuf *om)
     s_session.data.imu_is_hist_burst = buf[20];
     s_session.data.has_raw_imu = true;
 
+
+    /* ---- feeding the seedlink accumulator ---- */
+    if (s_seedlink_idx == 0)
+    {
+        s_seedlink_payload.timestamp = time(NULL);   /* gateway's own wall-clock at batch start*/
+        s_seedlink_payload.sequence_number = s_seedlink_sequence++;
+    }
+
+    s_seedlink_payload.ax[s_seedlink_idx] = s_session.data.accel_x / 16384.0f;   /*4g / 65536 counts = 1/16384 g per count = 0.000061 g/LSB*/
+    s_seedlink_payload.ay[s_seedlink_idx] = s_session.data.accel_y / 16384.0f;
+    s_seedlink_payload.az[s_seedlink_idx] = s_session.data.accel_z / 16384.0f;
+    s_seedlink_idx++;
+
+    if (s_seedlink_idx >= IMU_MAX_SAMPLES)
+    {
+        xQueueSend(seedlink_get_queue(), &s_seedlink_payload, 0);
+        s_seedlink_idx = 0;
+    }
+    /* ---- end: seedlink accumulator ---- */
+
+
+
+
     /* compare accel/gyro (buf[0..15]) + hist_burst (buf[20]) only - timestamp
        (buf[16..19]) is excluded, see s_last_raw_imu declaration */
     uint8_t key[17];
@@ -160,7 +195,9 @@ static void handle_raw_imu_notify(struct os_mbuf *om)
     if (changed) {
         memcpy(s_last_raw_imu, key, sizeof(key));
         s_has_last_raw_imu = true;
-        report();
+        if (!hide_gatt_logs) {
+            report();
+        }
     }
 }
 
@@ -289,7 +326,7 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
     s_has_last_tilt_data = false;
     s_has_last_raw_imu = false;
 
-    int rc = ble_gap_connect(s_own_addr_type, peer_addr, 30000, NULL,  gatt_gap_event_cb, NULL);
+    int rc = ble_gap_connect(s_own_addr_type, peer_addr, 60000, NULL, gatt_gap_event_cb, NULL);
     if (rc != 0) {
         ESP_LOGE(TAG, "ble_gap_connect failed: %d", rc);
         end_session();

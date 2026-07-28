@@ -164,7 +164,7 @@ uint8_t *mseed_record(float *p_data, mseed_config_t *sp_cfg)
             0,                              // unused
             _BEu16(time_fract),             // fract
             _BEu16(c_sample_count),         // numsamples
-            _BEi16(100),                    // samprate_fact
+            _BEi16((int16_t)sp_cfg->rate_hz),  // samprate_fact
             _BEi16(1),                      // samprate_mult
             0,                              // act_flags
             0,                              // io_flags
@@ -207,14 +207,18 @@ uint8_t *mseed_datalink(uint8_t *p_record, mseed_config_t *sp_cfg)
     const char *format = " %-2.2s_%-5.5s_%-2.2s_%-3.3s/MSEED %llu000000 %llu000000 N 512 ";
 
     uint8_t preHeader[] = {68, 76, (5 + 63), 87, 82, 73, 84, 69};
+
+
     uint64_t start_time = sp_cfg->start_time;
+    uint64_t duration_s = (sp_cfg->rate_hz > 0) ? (sp_cfg->sample_count / sp_cfg->rate_hz) : 1;
+    uint64_t end_time = start_time + duration_s;
 
     sprintf(header, format,
             sp_cfg->network,
             sp_cfg->station,
             sp_cfg->location,
             sp_cfg->channel,
-            start_time, start_time + 1);
+            start_time, end_time);
 
     memset(g_dataLink_pkt, 0, sizeof(g_dataLink_pkt));
     memcpy(g_dataLink_pkt, preHeader, 8);
