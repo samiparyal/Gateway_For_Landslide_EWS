@@ -3,6 +3,8 @@
 #include "esp_netif.h"
 #include "esp_log.h"
 #include "freertos/event_groups.h"
+#include "esp_sntp.h"
+
 
 #define WIFI_SSID      "ASUS_Intern"
 #define WIFI_PASSWORD  "iknowyouknow"
@@ -10,6 +12,31 @@
 static const char *TAG = "WIFI";
 static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
+
+static void wifi_sntp_sync_time(void)
+{
+    esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_init();
+
+    time_t now = 0;
+    int retry = 0;
+    const int retry_count = 15;
+    while (now < 1700000000 && ++retry < retry_count)   // sanity floor: a real recent epoch
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        time(&now);
+    }
+
+    if (now < 1700000000)
+    {
+        ESP_LOGE(TAG, "SNTP sync failed, timestamps will be wrong");
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Time synced: %lld", (long long)now);
+    }
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                 int32_t event_id, void *event_data)
@@ -57,4 +84,6 @@ void wifi_conn_init(void)
 
     ESP_LOGI(TAG, "Connecting to %s...", WIFI_SSID);
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+
+    wifi_sntp_sync_time(); 
 }

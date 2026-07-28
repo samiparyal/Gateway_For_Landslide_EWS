@@ -164,13 +164,22 @@ static esp_err_t _payload_send(imu_payload_t *sp_payload)
 {
     esp_err_t ret = ESP_FAIL;
     uint8_t buffer[2048];
-
     uint32_t size = _pkt_create(sp_payload, buffer, sizeof(buffer));
-
     if (size)
     {
-        int sent = send(g_s_self.sock, buffer, size, 0);
-        if (sent < 0)
+        uint32_t total_sent = 0;
+        bool failed = false;
+        while (total_sent < size)
+        {
+            int sent = send(g_s_self.sock, buffer + total_sent, size - total_sent, 0);
+            if (sent <= 0)
+            {
+                failed = true;
+                break;
+            }
+            total_sent += (uint32_t)sent;
+        }
+        if (failed)
         {
             close(g_s_self.sock);
             g_s_self.sock = -1;
@@ -178,10 +187,27 @@ static esp_err_t _payload_send(imu_payload_t *sp_payload)
         }
         else
         {
+            /* ---- read back ringserver's response, now that the WRITE command asks for one (the 'A' flag) ---- */
+            char resp[128] = {0};
+            int r = recv(g_s_self.sock, resp, sizeof(resp) - 1, 0);
+            if (r > 0)
+            {
+                resp[r] = '\0';
+                ESP_LOGI(LOG_TAG, "Server response: %s", resp);
+            }
+            else if (r == 0)
+            {
+                ESP_LOGW(LOG_TAG, "Server closed connection with no response");
+            }
+            else
+            {
+                ESP_LOGW(LOG_TAG, "recv() failed/timed out waiting for response");
+            }
+            /**/
+
             ret = ESP_OK;
         }
     }
-
     return ret;
 }
 
@@ -210,6 +236,9 @@ static void _task_connect(void *vp_arg)
         g_s_self.sock = socket(AF_INET, SOCK_STREAM, 0);
         if (connect(g_s_self.sock, (struct sockaddr *)&addr, sizeof(addr)) == 0)
         {
+            struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
+            setsockopt(g_s_self.sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
             ESP_LOGW(LOG_TAG, "Connected to Seedlink server");
             xSemaphoreGive(g_s_self.sem_connect);
             break;
