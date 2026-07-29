@@ -129,7 +129,7 @@ static uint32_t _pkt_create(imu_payload_t *sp_payload, uint8_t *p_buffer, uint32
     s_cfg.sample_count = IMU_MAX_SAMPLES;
     s_cfg.sequence_number = sp_payload->sequence_number;
     s_cfg.rate_hz = IMU_SAMPLE_RATE_HZ;   
-    strlcpy(s_cfg.station,  "DMG13", sizeof(s_cfg.station));   //  station code
+    strlcpy(s_cfg.station,  "DMG37", sizeof(s_cfg.station));   //  station code
     strlcpy(s_cfg.location, "00",    sizeof(s_cfg.location));
     strlcpy(s_cfg.network,  "NP",    sizeof(s_cfg.network));  
     s_cfg.start_time = sp_payload->timestamp;

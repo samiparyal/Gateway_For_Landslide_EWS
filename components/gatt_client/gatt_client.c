@@ -10,7 +10,9 @@
 #include "server_comm.h"
 #include "json_builder.h"
 #include "seedlink.h"
+#include "freertos/task.h"  
 #include <time.h>
+#include <stdio.h>
 
 static const char *TAG = "GATT_CLIENT";
 
@@ -88,6 +90,10 @@ static uint32_t le32_to_uint32(const uint8_t *p)
 
 static void report(void)
 {
+    /* Training mode: raw simplified stream only*/
+    if (training_mode_sim_logs) {
+        return;
+    }
     char *json = json_builder_build_gatt(&s_session.peer_addr, &s_session.data);
     if (json != NULL) {
         server_comm_send_json(json);
@@ -166,7 +172,7 @@ static void handle_raw_imu_notify(struct os_mbuf *om)
     /* ---- feeding the seedlink accumulator ---- */
     if (s_seedlink_idx == 0)
     {
-        s_seedlink_payload.timestamp = time(NULL);   /* gateway's own wall-clock at batch start*/
+        s_seedlink_payload.timestamp = time(NULL);   
         s_seedlink_payload.sequence_number = s_seedlink_sequence++;
     }
 
@@ -182,8 +188,13 @@ static void handle_raw_imu_notify(struct os_mbuf *om)
     }
     /* ---- end: seedlink accumulator ---- */
 
-
-
+    if (training_mode_sim_logs) {
+        printf("%lu,%d,%d,%d,%d,%d,%d\n",
+               (unsigned long)s_session.data.imu_timestamp_ms,
+               s_session.data.accel_x, s_session.data.accel_y, s_session.data.accel_z,
+               s_session.data.gyro_x,  s_session.data.gyro_y,  s_session.data.gyro_z);
+        return;
+    }
 
     /* compare accel/gyro (buf[0..15]) + hist_burst (buf[20]) only - timestamp
        (buf[16..19]) is excluded, see s_last_raw_imu declaration */
@@ -326,7 +337,16 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
     s_has_last_tilt_data = false;
     s_has_last_raw_imu = false;
 
-    int rc = ble_gap_connect(s_own_addr_type, peer_addr, 60000, NULL, gatt_gap_event_cb, NULL);
+    static const struct ble_gap_conn_params cp = {
+    .scan_itvl = 0x0010, .scan_window = 0x0010,
+    .itvl_min = 6,   /* 7.5 ms */
+    .itvl_max = 12,  /* 15 ms  */
+    .latency = 0,
+    .supervision_timeout = 400,  /* 4 s */
+    .min_ce_len = 0, .max_ce_len = 0,
+    };
+    int rc = ble_gap_connect(s_own_addr_type, peer_addr, 60000, &cp, gatt_gap_event_cb, NULL);
+
     if (rc != 0) {
         ESP_LOGE(TAG, "ble_gap_connect failed: %d", rc);
         end_session();

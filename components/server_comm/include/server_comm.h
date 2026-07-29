@@ -5,6 +5,10 @@
 extern bool g_gatt_connect_requested;
 extern bool hide_gatt_logs;
 
+/* Training-data collection mode: raw IMU handler skips dedup + JSON report
+ * Match with TRAINING_MODE_ENABLED on the sensor node. */
+extern bool training_mode_sim_logs;
+
 void server_comm_init(void);
 
 /*
