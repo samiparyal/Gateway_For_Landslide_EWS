@@ -6,7 +6,7 @@ static const char *TAG = "SERVER_COMM";
 
 bool hide_gatt_logs = false;
 
-bool training_mode_sim_logs = true; 
+bool training_mode_sim_logs = false; 
 
 bool g_gatt_connect_requested = true; /* for testing use true */
 

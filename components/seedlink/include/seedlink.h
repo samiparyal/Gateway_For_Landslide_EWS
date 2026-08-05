@@ -13,7 +13,7 @@ uint32_t seedlink_get_stored(void);
 // 512-byte record (fixed by SeedLink) - 56 bytes (48 header + 8 blockette1000) = 456 bytes free
 // 456 / 4 bytes-per-float32-sample = 114 samples max per record
 
-#define IMU_SAMPLE_RATE_HZ 100   // TRAINING_MODE_RATE_MS on the sensor node
+#define IMU_SAMPLE_RATE_HZ 120   // TRAINING_MODE_RATE_MS on the sensor node
 
 typedef struct {
     uint32_t sequence_number;
