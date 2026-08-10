@@ -18,7 +18,7 @@ typedef struct {
     /* RawImuSample characteristic (0xFF04) */
     int16_t accel_x, accel_y, accel_z;
     int16_t gyro_x, gyro_y, gyro_z;
-    uint32_t imu_timestamp_ms;
+    uint64_t imu_timestamp_ms;
     uint8_t imu_is_hist_burst;
     bool has_raw_imu;
 } gatt_landslide_data_t;

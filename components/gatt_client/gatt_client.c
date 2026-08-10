@@ -45,7 +45,7 @@ static uint8_t s_last_tilt_data[4];
 static bool s_has_last_tilt_data;
 
 /* excludes imu_timestamp_ms */
-static uint8_t s_last_raw_imu[17]; /* buf[0..15] (accel/gyro) + buf[20] (hist_burst) */
+static uint8_t s_last_raw_imu[17]; /* buf[0..15] (accel/gyro) + buf[24] (hist_burst) */
 static bool s_has_last_raw_imu;
 
 static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg);
@@ -83,15 +83,20 @@ static uint16_t le16_to_uint16(const uint8_t *p) //little endian two consecutive
     return (uint16_t)(p[0] | ((uint16_t)p[1] << 8)); 
 }
 
-static uint32_t le32_to_uint32(const uint8_t *p)
+static uint64_t le64_to_uint64(const uint8_t *p)
 {
-    return (uint32_t)(p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24));
+    uint64_t v = 0;
+    for (int i = 7; i >= 0; i--) {
+        v = (v << 8) | p[i];
+    }
+    return v;
 }
 
 static void report(void)
 {
     /* Training mode: raw simplified stream only*/
-    if (training_mode_sim_logs) {
+    if (training_mode) {
+        hide_gatt_logs = true;
         return;
     }
     char *json = json_builder_build_gatt(&s_session.peer_addr, &s_session.data);
@@ -110,6 +115,11 @@ static void handle_alert_status_notify(struct os_mbuf *om)
     }
     os_mbuf_copydata(om, 0, sizeof(buf), buf);
 
+    /* state (buf[0]) specifically, not trigger (buf[1]) - TSS is capped at
+       1 post/sec, so only a real state transition should post, not every
+       trigger-reason bit flip (those can happen without the state changing). */
+    bool state_changed = !s_has_last_alert_status || buf[0] != s_last_alert_status[0];
+
     s_session.data.alarm = buf[0];
     s_session.data.trigger = buf[1];
     s_session.data.has_alert_status = true;
@@ -121,6 +131,13 @@ static void handle_alert_status_notify(struct os_mbuf *om)
         if (!hide_gatt_logs) {
             report();
         }
+    }
+
+    if (state_changed && s_session.data.has_raw_imu && s_session.data.has_tilt_data) {
+        server_comm_post_snapshot(s_session.data.alarm, s_session.data.trigger,
+                                   s_session.data.dev_x100, s_session.data.vel_x100,
+                                   s_session.data.accel_x, s_session.data.accel_y, s_session.data.accel_z,
+                                   s_session.data.gyro_x, s_session.data.gyro_y, s_session.data.gyro_z);
     }
 }
 
@@ -149,7 +166,7 @@ static void handle_tilt_data_notify(struct os_mbuf *om)
 
 static void handle_raw_imu_notify(struct os_mbuf *om)
 {
-    uint8_t buf[21];
+    uint8_t buf[25];
     if (OS_MBUF_PKTLEN(om) < sizeof(buf)) {
         ESP_LOGW(TAG, "RawImuSample notify too short");
         return;
@@ -163,44 +180,47 @@ static void handle_raw_imu_notify(struct os_mbuf *om)
     s_session.data.gyro_y  = (int16_t)le16_to_uint16(&buf[8]);
     s_session.data.gyro_z  = (int16_t)le16_to_uint16(&buf[10]);
     /* buf[12..15] duplicate TiltData's dev_x100/vel_x100 - not re-read here,
-       TiltData is the authoritative source for those two fields */
-    s_session.data.imu_timestamp_ms = le32_to_uint32(&buf[16]);
-    s_session.data.imu_is_hist_burst = buf[20];
+       TiltData is the main source for those two fields */
+    s_session.data.imu_timestamp_ms = le64_to_uint64(&buf[16]);   /* now 8 bytes (16..23), widened to avoid ~50-day wraparound */
+    s_session.data.imu_is_hist_burst = buf[24];
     s_session.data.has_raw_imu = true;
 
 
-    /* ---- feeding the seedlink accumulator ---- */
-    if (s_seedlink_idx == 0)
+    /* ---- feeding the seedlink accumulator - training mode only ---- */
+    if (training_mode)
     {
-        s_seedlink_payload.timestamp = time(NULL);   
-        s_seedlink_payload.sequence_number = s_seedlink_sequence++;
-    }
+        if (s_seedlink_idx == 0)
+        {
+            s_seedlink_payload.timestamp = time(NULL);
+            s_seedlink_payload.sequence_number = s_seedlink_sequence++;
+        }
 
-    s_seedlink_payload.ax[s_seedlink_idx] = s_session.data.accel_x / 16384.0f;   /*4g / 65536 counts = 1/16384 g per count = 0.000061 g/LSB*/
-    s_seedlink_payload.ay[s_seedlink_idx] = s_session.data.accel_y / 16384.0f;
-    s_seedlink_payload.az[s_seedlink_idx] = s_session.data.accel_z / 16384.0f;
-    s_seedlink_idx++;
+        s_seedlink_payload.ax[s_seedlink_idx] = s_session.data.accel_x / 16384.0f;   /*4g / 65536 counts = 1/16384 g per count = 0.000061 g/LSB*/
+        s_seedlink_payload.ay[s_seedlink_idx] = s_session.data.accel_y / 16384.0f;
+        s_seedlink_payload.az[s_seedlink_idx] = s_session.data.accel_z / 16384.0f;
+        s_seedlink_idx++;
 
-    if (s_seedlink_idx >= IMU_MAX_SAMPLES)
-    {
-        xQueueSend(seedlink_get_queue(), &s_seedlink_payload, 0);
-        s_seedlink_idx = 0;
+        if (s_seedlink_idx >= IMU_MAX_SAMPLES)
+        {
+            xQueueSend(seedlink_get_queue(), &s_seedlink_payload, 0);
+            s_seedlink_idx = 0;
+        }
     }
     /* ---- end: seedlink accumulator ---- */
 
-    if (training_mode_sim_logs) {
-        printf("%lu,%d,%d,%d,%d,%d,%d\n",
-               (unsigned long)s_session.data.imu_timestamp_ms,
+    if (training_mode) {
+        printf("%llu,%d,%d,%d,%d,%d,%d\n",
+               (unsigned long long)s_session.data.imu_timestamp_ms,
                s_session.data.accel_x, s_session.data.accel_y, s_session.data.accel_z,
                s_session.data.gyro_x,  s_session.data.gyro_y,  s_session.data.gyro_z);
         return;
     }
 
-    /* compare accel/gyro (buf[0..15]) + hist_burst (buf[20]) only - timestamp
-       (buf[16..19]) is excluded, see s_last_raw_imu declaration */
+    /* compare accel/gyro (buf[0..15]) + hist_burst (buf[24]) only - timestamp
+       (buf[16..23]) is excluded, see s_last_raw_imu declaration */
     uint8_t key[17];
     memcpy(key, buf, 16);
-    key[16] = buf[20];
+    key[16] = buf[24];
 
     bool changed = !s_has_last_raw_imu || memcmp(key, s_last_raw_imu, sizeof(key)) != 0;
     if (changed) {
@@ -209,6 +229,9 @@ static void handle_raw_imu_notify(struct os_mbuf *om)
         if (!hide_gatt_logs) {
             report();
         }
+        /* TSS post moved to handle_alert_status_notify() - it needs to fire
+           on state change, not on every changed accel sample (TSS is capped
+           at 1 post/sec, RawIMU changes far more often than that). */
     }
 }
 
