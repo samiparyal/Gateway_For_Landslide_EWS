@@ -10,6 +10,9 @@
 #include "gatt_client.h"
 #include "wifi_conn.h"
 #include "seedlink.h"
+#include "wifi_conn.h"
+#include "gsm_conn.h"
+#include "seedlink.h"
 
 #define TAG "BLE_APP"
 
@@ -83,7 +86,11 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(nvs_ret);
 
-    wifi_conn_init();   
+#if USE_WIFI_INSTEAD_OF_GSM
+    wifi_conn_init();
+#else
+    gsm_conn_init();
+#endif
 
     esp_err_t ret = nimble_port_init();
     if(ret != ESP_OK) {
