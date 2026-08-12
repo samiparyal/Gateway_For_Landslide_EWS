@@ -18,9 +18,6 @@
 #define TAG "BLE_APP"
 
 /*
- * Fixed static-random BD address for this gateway, for other
- * device's connection filter accept list.
- *
  * ble_hs_id_set_rnd() takes the address in host (little-endian) order,
  * Displayed MSB-first this is C0:52:54:53:4C:47.
  *   - 0xC0: top two bits must be 11 for a valid static-random address

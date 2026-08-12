@@ -18,18 +18,26 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg);
 
 void gap_scan_start(uint8_t own_addr_type)
 {
-    struct ble_gap_disc_params disc_params = {0};
+    /* Legacy ble_gap_disc() only scans the LE 1M primary channel and will
+       never see a Coded-PHY (long range) advertisement. ble_gap_ext_disc()
+       scans both PHYs at once */
+    struct ble_gap_ext_disc_params uncoded_params = {0};
+    uncoded_params.passive = 1;
+    uncoded_params.itvl = uncoded_params.window = 0x0010; // 10ms
 
-    disc_params.passive = 1;
-    disc_params.itvl = disc_params.window = 0x0010; // 10ms
-    disc_params.filter_duplicates = 0; //for debugging
+    struct ble_gap_ext_disc_params coded_params = {0};
+    coded_params.passive = 1;
+    coded_params.itvl = coded_params.window = 0x0010; // 10ms
 
-    int rc = ble_gap_disc(own_addr_type, BLE_HS_FOREVER, &disc_params, ble_gap_event_cb, NULL);
+    /* duration=0, period=0 -> scan continuously.
+       filter_duplicates=0 (debugging), filter_policy=0 (no accept-list), limited=0 (general discovery) */
+    int rc = ble_gap_ext_disc(own_addr_type, 0, 0, 0, 0, 0,
+                               &uncoded_params, &coded_params, ble_gap_event_cb, NULL);
     if (rc != 0) {
-        ESP_LOGE(TAG, "ble_gap_disc failed: %d", rc);
+        ESP_LOGE(TAG, "ble_gap_ext_disc failed: %d", rc);
         return;
     }
-    ESP_LOGI(TAG, "Scanning started (own_addr_type=%d)", own_addr_type);
+    ESP_LOGI(TAG, "Scanning started, 1M + Coded PHY (own_addr_type=%d)", own_addr_type);
 }
 
 static void log_addr(const ble_addr_t *addr)
@@ -106,15 +114,32 @@ static bool mfg_data_changed(const ble_addr_t *addr, const uint8_t *mfg_data, ui
 
 static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
 {
-    if (event->type != BLE_GAP_EVENT_DISC) {
+    /* ble_gap_ext_disc() reports arrive as BLE_GAP_EVENT_EXT_DISC
+       (event->ext_disc), not BLE_GAP_EVENT_DISC (event->disc) */
+    const uint8_t *adv_data;
+    uint8_t adv_data_len;
+    const ble_addr_t *adv_addr;
+    int8_t adv_rssi;
+
+    if (event->type == BLE_GAP_EVENT_DISC) {
+        adv_data     = event->disc.data;
+        adv_data_len = event->disc.length_data;
+        adv_addr     = &event->disc.addr;
+        adv_rssi     = event->disc.rssi;
+    } else if (event->type == BLE_GAP_EVENT_EXT_DISC) {
+        adv_data     = event->ext_disc.data;
+        adv_data_len = event->ext_disc.length_data;
+        adv_addr     = &event->ext_disc.addr;
+        adv_rssi     = event->ext_disc.rssi;
+    } else {
         return 0;
     }
 
     struct ble_hs_adv_fields fields;
-    int rc = ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data);
+    int rc = ble_hs_adv_parse_fields(&fields, adv_data, adv_data_len);
 
     if (rc != 0) {
-        ESP_LOG_BUFFER_HEX(TAG, event->disc.data, event->disc.length_data); //malformed adv data
+        ESP_LOG_BUFFER_HEX(TAG, adv_data, adv_data_len); //malformed adv data
         return 0;
     }
 
@@ -123,16 +148,16 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
     }
 
     if (g_gatt_connect_requested) {
-        gatt_client_connect(&event->disc.addr);
+        gatt_client_connect(adv_addr);
     }
 
     if (fields.mfg_data == NULL || fields.mfg_data_len < 6 ||
-        !mfg_data_changed(&event->disc.addr, fields.mfg_data, fields.mfg_data_len)) {
+        !mfg_data_changed(adv_addr, fields.mfg_data, fields.mfg_data_len)) {
         return 0; /* nothing new to report from this peer */
     }
 
-    ESP_LOGI(TAG, "EWS adv matched, rssi=%d", event->disc.rssi);
-    log_addr(&event->disc.addr);
+    ESP_LOGI(TAG, "EWS adv matched, rssi=%d", adv_rssi);
+    log_addr(adv_addr);
 
     /* mfg_data layout: [company_id_lo][company_id_hi][alarm][src][vel_x100][trigger] */
     uint8_t status     = fields.mfg_data[2];
@@ -164,7 +189,7 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
              status, status_str, src_deg, vel_x100 / 100.0f, trigger, trigger_str);
     ESP_LOGI(TAG, "------------------------------------------------------------------------------------------------");
 
-    char *json = json_builder_build_advert(&event->disc.addr, event->disc.rssi,
+    char *json = json_builder_build_advert(adv_addr, adv_rssi,
                                             status, src_deg, vel_x100, trigger);
     if (json != NULL) {
         server_comm_send_json(json);
