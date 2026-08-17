@@ -2,6 +2,24 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
+#include "seedlink.h"
+
+
+typedef struct {
+    uint8_t addr[6];           /* BLE address of the sensor node */
+    const char *station;       /* SeedLink station code */
+    const char *origin_code;   /* TSS origin code */
+} sensor_id_t;
+
+const sensor_id_t *server_comm_sensor_id_lookup(const uint8_t addr[6]);
+
+/* Number of entries in the known-sensors table. Used as a logging-verbosity
+   gate: exactly 1 known sensor -> log every data change (bench debugging),
+   more than 1 -> log only on real state changes, mirroring the TSS post
+   trigger, so multiple sensors at 120Hz don't flood the console UART. */
+size_t server_comm_known_sensor_count(void);
+
 
 /* Must match the sensor node's LSM6DSV16X full-scale config exactly - see
    lsm6dsv16x_xl_full_scale_set() / lsm6dsv16x_gy_full_scale_set() calls in
@@ -24,13 +42,23 @@ void server_comm_init(void);
 
 void server_comm_handle_command(const char *cmd_str);
 
-void server_comm_send_json(const char *json_str);
+void server_comm_log_json(const char *json_str);
 
 /*
  * Posts one full state snapshot to the TSS Data Import API (POST /import) as
  * ten observations
  */
-void server_comm_post_snapshot(uint8_t status, uint8_t trigger,
+void server_comm_post_snapshot(const char *origin_code,uint8_t status, uint8_t trigger,
                                 uint16_t dev_x100, uint16_t vel_x100,
                                 int16_t ax, int16_t ay, int16_t az,
                                 int16_t gx, int16_t gy, int16_t gz);
+
+/*
+ * Accumulates one raw accel sample into *payload at *idx, tags it with
+ * sensor_id's station code on the first sample of a new batch, and once
+ * IMU_MAX_SAMPLES samples have been collected, queues the full payload to
+ * the SeedLink task and resets *idx to 0 for the next batch.
+ */
+void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
+                                const sensor_id_t *sensor_id,
+                                int16_t accel_x, int16_t accel_y, int16_t accel_z);

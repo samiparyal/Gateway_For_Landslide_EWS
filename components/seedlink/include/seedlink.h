@@ -18,6 +18,7 @@ uint32_t seedlink_get_stored(void);
 typedef struct {
     uint32_t sequence_number;
     uint64_t timestamp;
+    char station[6];   /* SEED station code: 5 chars max + null terminator */
     float ax[IMU_MAX_SAMPLES];
     float ay[IMU_MAX_SAMPLES];
     float az[IMU_MAX_SAMPLES];

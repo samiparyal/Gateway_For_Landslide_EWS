@@ -145,7 +145,7 @@ uint8_t *mseed_record(float *p_data, mseed_config_t *sp_cfg)
     sprintf(sequence, "%06ld", sp_cfg->sequence_number);
 
     struct tm s_tm;
-    memcpy(&s_tm, gmtime((const time_t *)&start_time), sizeof(struct tm)); // must use utc time to send data in server
+    memcpy(&s_tm, gmtime((const time_t *)&start_time), sizeof(struct tm)); // start_time is pre-shifted to NPT (UTC+5:45) in seedlink_send() - gmtime() just does the calendar breakdown
 
     mseed_header_t s_header =
         {

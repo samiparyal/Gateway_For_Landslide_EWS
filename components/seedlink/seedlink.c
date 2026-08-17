@@ -129,7 +129,11 @@ static uint32_t _pkt_create(imu_payload_t *sp_payload, uint8_t *p_buffer, uint32
     s_cfg.sample_count = IMU_MAX_SAMPLES;
     s_cfg.sequence_number = sp_payload->sequence_number;
     s_cfg.rate_hz = IMU_SAMPLE_RATE_HZ;   
-    strlcpy(s_cfg.station,  "DMG37", sizeof(s_cfg.station));   //  station code
+    //strlcpy(s_cfg.station,  "DMG37", sizeof(s_cfg.station));   //  station code
+    strlcpy(s_cfg.station, sp_payload->station[0] ? sp_payload->station : "DMG37", sizeof(s_cfg.station)); 
+    /* Use the station name if first byte is non-zero, otherwise default to "DMG37" 
+    * if empty; station[] = ""  -> '\0'
+    */
     strlcpy(s_cfg.location, "00",    sizeof(s_cfg.location));
     strlcpy(s_cfg.network,  "NP",    sizeof(s_cfg.network));  
     s_cfg.start_time = sp_payload->timestamp;
@@ -187,24 +191,8 @@ static esp_err_t _payload_send(imu_payload_t *sp_payload)
         }
         else
         {
-            /* ---- read back ringserver's response, now that the WRITE command asks for one (the 'A' flag) ---- */
-            char resp[128] = {0};
-            int r = recv(g_s_self.sock, resp, sizeof(resp) - 1, 0);
-            if (r > 0)
-            {
-                resp[r] = '\0';
-                ESP_LOGI(LOG_TAG, "Server response: %s", resp);
-            }
-            else if (r == 0)
-            {
-                ESP_LOGW(LOG_TAG, "Server closed connection with no response");
-            }
-            else
-            {
-                ESP_LOGW(LOG_TAG, "recv() failed/timed out waiting for response");
-            }
-            /**/
-
+            /* WRITE command's flag byte is 'N' (mseed_datalink) - no ack
+               requested, so don't wait on recv() for one.  */
             ret = ESP_OK;
         }
     }

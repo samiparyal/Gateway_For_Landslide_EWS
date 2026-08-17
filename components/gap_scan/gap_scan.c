@@ -69,7 +69,8 @@ static bool adv_matches_ews(const struct ble_hs_adv_fields *fields)
 
 static sensor_state_t s_sensors[MAX_TRACKED_SENSORS];
 
-static bool mfg_data_changed(const ble_addr_t *addr, const uint8_t *mfg_data, uint8_t mfg_data_len)
+static bool mfg_data_changed(const ble_addr_t *addr, const uint8_t *mfg_data, uint8_t mfg_data_len,
+                              bool *status_changed_out)
 {
     sensor_state_t *slot = NULL;
     sensor_state_t *free_slot = NULL;
@@ -84,9 +85,14 @@ static bool mfg_data_changed(const ble_addr_t *addr, const uint8_t *mfg_data, ui
         }
     }
 
+    bool had_prev_status = (slot != NULL) && slot->mfg_data_len > 2;
+    uint8_t prev_status = had_prev_status ? slot->mfg_data[2] : 0;
+
     if (slot == NULL) {
-        if (free_slot == NULL) {
+        if (free_slot == NULL) 
+        {
             ESP_LOGW(TAG, "Sensor table full (%d)", MAX_TRACKED_SENSORS);
+            if (status_changed_out) *status_changed_out = true;
             return true; /* no slot to track it in */
         }
         slot = free_slot;
@@ -97,6 +103,12 @@ static bool mfg_data_changed(const ble_addr_t *addr, const uint8_t *mfg_data, ui
 
     bool changed = mfg_data_len != slot->mfg_data_len ||
                    memcmp(mfg_data, slot->mfg_data, mfg_data_len) != 0;
+
+    if (status_changed_out) 
+    {
+        *status_changed_out = !had_prev_status ||
+                               (mfg_data_len > 2 && mfg_data[2] != prev_status);
+    }
 
     if (changed) {
         memcpy(slot->mfg_data, mfg_data, mfg_data_len);
@@ -151,9 +163,14 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
         gatt_client_connect(adv_addr);
     }
 
+    bool status_changed = false;
     if (fields.mfg_data == NULL || fields.mfg_data_len < 6 ||
-        !mfg_data_changed(adv_addr, fields.mfg_data, fields.mfg_data_len)) {
+        !mfg_data_changed(adv_addr, fields.mfg_data, fields.mfg_data_len, &status_changed)) {
         return 0; /* nothing new to report from this peer */
+    }
+
+    if (server_comm_known_sensor_count() > 1 && !status_changed) {
+        return 0; /* multi-sensor: only log real alarm-status transitions, not dev/rate drift */
     }
 
     log_addr(adv_addr);
@@ -188,12 +205,13 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
              status, status_str, src_deg, vel_x100 / 100.0f, trigger, trigger_str);
     ESP_LOGI(TAG, "------------------------------------------------------------------------------------------------");
 
-    char *json = json_builder_build_advert(adv_addr, adv_rssi,
-                                            status, src_deg, vel_x100, trigger);
-    if (json != NULL) {
-        server_comm_send_json(json);
-        cJSON_free(json);
-    }
+    /* disabled */
+    // char *json = json_builder_build_advert(adv_addr, adv_rssi,
+    //                                         status, src_deg, vel_x100, trigger);
+    // if (json != NULL) {
+    //     server_comm_log_json(json);
+    //     cJSON_free(json);
+    // }
 
     return 0;
 }

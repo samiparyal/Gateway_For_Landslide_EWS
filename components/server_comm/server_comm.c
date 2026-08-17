@@ -11,11 +11,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "seedlink.h"
 
 static const char *TAG = "SERVER_COMM";
 
 #define TSS_IMPORT_URL      "https://alpha.wscada.net/import"
-#define TSS_ORIGIN_CODE      "600"
+#define TSS_ORIGIN_CODE_DEFAULT      "600"
 
 #define TSS_PARAM_ACCEL_X    "ACC_X"
 #define TSS_PARAM_ACCEL_Y    "ACC_Y"
@@ -31,7 +32,32 @@ static const char *TAG = "SERVER_COMM";
 #define TSS_PARAM_TRIGGER      "ALARM_T"
 
 
-bool hide_gatt_logs = false;  /*auto hides gatt logs when training mode is enabled*/
+
+static const sensor_id_t s_known_sensors[] = {
+    { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234
+    { {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, 
+    { {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" },
+    /* add one row per deployed sensor - fill all needed */
+};
+#define NUM_KNOWN_SENSORS (sizeof(s_known_sensors) / sizeof(s_known_sensors[0]))
+
+size_t server_comm_known_sensor_count(void)
+{
+    return NUM_KNOWN_SENSORS;
+}
+
+const sensor_id_t *server_comm_sensor_id_lookup(const uint8_t addr[6])
+{
+    for (size_t i = 0; i < NUM_KNOWN_SENSORS; i++) {
+        if (memcmp(s_known_sensors[i].addr, addr, 6) == 0) {
+            return &s_known_sensors[i];
+        }
+    }
+    return NULL;
+}
+
+
+bool hide_gatt_logs = false;  
 
 bool training_mode = true; /* for turning on seedlink server and raw data logs */
 
@@ -42,6 +68,7 @@ bool restart_sensor_node = true;
 /* TSS post (esp_http_client + TLS) must never run on the nimble_host task, producer (BLE callback) just enqueues, a dedicated
    task with its own stack does the actual blocking network I/O. */
 typedef struct {
+    const char *origin_code;
     uint8_t status, trigger;
     uint16_t dev_x100, vel_x100;
     int16_t ax, ay, az, gx, gy, gz;
@@ -97,15 +124,15 @@ void server_comm_handle_command(const char *cmd_str)
     }
 }
 
-void server_comm_send_json(const char *json_str)
+void server_comm_log_json(const char *json_str)
 {
     ESP_LOGI(TAG, "\n [gateway -> server] %s \n", json_str);
 }
 
-static void add_observation(cJSON *arr, const char *param_code, const char *time_str, int value)
+static void add_observation(cJSON *arr, const char *origin_code, const char *param_code, const char *time_str, int value)
 {
     cJSON *obs = cJSON_CreateObject();
-    cJSON_AddStringToObject(obs, "origin_code", TSS_ORIGIN_CODE);
+    cJSON_AddStringToObject(obs, "origin_code", origin_code);
     cJSON_AddStringToObject(obs, "parameter_code", param_code);
     cJSON_AddStringToObject(obs, "time", time_str);
     cJSON_AddNumberToObject(obs, "value", value);
@@ -130,25 +157,53 @@ static int gyro_lsb_to_dps(int16_t raw)
     return (int)lroundf(dps);
 }
 
-void server_comm_post_snapshot(uint8_t status, uint8_t trigger,
+void server_comm_post_snapshot(const char *origin_code, uint8_t status, uint8_t trigger,
                                 uint16_t dev_x100, uint16_t vel_x100,
                                 int16_t ax, int16_t ay, int16_t az,
                                 int16_t gx, int16_t gy, int16_t gz)
 {
-    if (s_tss_queue == NULL) {
+    if (s_tss_queue == NULL)
+    {
         ESP_LOGW(TAG, "TSS post skipped: server_comm_init() not called yet");
         return;
     }
 
-    tss_snapshot_t item = {
+    tss_snapshot_t item =
+    {
+        .origin_code = origin_code,
         .status = status, .trigger = trigger,
         .dev_x100 = dev_x100, .vel_x100 = vel_x100,
         .ax = ax, .ay = ay, .az = az,
         .gx = gx, .gy = gy, .gz = gz,
     };
 
-    if (xQueueSend(s_tss_queue, &item, 0) != pdTRUE) {
+    if (xQueueSend(s_tss_queue, &item, 0) != pdTRUE)
+    {
         ESP_LOGW(TAG, "TSS post skipped: queue full");
+    }
+}
+
+void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
+                                const sensor_id_t *sensor_id,
+                                int16_t accel_x, int16_t accel_y, int16_t accel_z)
+{
+    if (*idx == 0)
+    {
+        /* Nepal std Time = UTC+5:45 */
+        payload->timestamp = time(NULL) + (5 * 3600 + 45 * 60);
+        payload->sequence_number = (*sequence)++;
+        strlcpy(payload->station, sensor_id ? sensor_id->station : "DMG37", sizeof(payload->station));
+    }
+
+    payload->ax[*idx] = accel_x / 16384.0f;
+    payload->ay[*idx] = accel_y / 16384.0f;
+    payload->az[*idx] = accel_z / 16384.0f;
+    (*idx)++;
+
+    if (*idx >= IMU_MAX_SAMPLES)
+    {
+        xQueueSend(seedlink_get_queue(), payload, 0);
+        *idx = 0;
     }
 }
 
@@ -181,24 +236,26 @@ static void tss_post_task(void *arg)
         int16_t gx = s.gx, gy = s.gy, gz = s.gz;
         uint16_t dev_x100 = s.dev_x100, vel_x100 = s.vel_x100;
         uint8_t status = s.status, trigger = s.trigger;
+        const char *origin_code = s.origin_code ? s.origin_code : TSS_ORIGIN_CODE_DEFAULT;
 
-        time_t now = time(NULL);
+        /* sending in Nepal Standard Time = UTC+5:45 */
+        time_t now = time(NULL) + (5 * 3600 + 45 * 60);
         struct tm tm_utc;
         gmtime_r(&now, &tm_utc);
         char time_str[24];
         strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", &tm_utc);
 
         cJSON *arr = cJSON_CreateArray();
-        add_observation(arr, TSS_PARAM_ACCEL_X, time_str, accel_lsb_to_deg(ax));
-        add_observation(arr, TSS_PARAM_ACCEL_Y, time_str, accel_lsb_to_deg(ay));
-        add_observation(arr, TSS_PARAM_ACCEL_Z, time_str, accel_lsb_to_deg(az));
-        add_observation(arr, TSS_PARAM_GYRO_X, time_str, gyro_lsb_to_dps(gx));
-        add_observation(arr, TSS_PARAM_GYRO_Y, time_str, gyro_lsb_to_dps(gy));
-        add_observation(arr, TSS_PARAM_GYRO_Z, time_str, gyro_lsb_to_dps(gz));
-        add_observation(arr, TSS_PARAM_DEVIATION, time_str, (int)lroundf((float)dev_x100 / 100.0f));
-        add_observation(arr, TSS_PARAM_RATE, time_str, (int)lroundf((float)vel_x100 / 100.0f));
-        add_observation(arr, TSS_PARAM_STATUS, time_str, (int)status);
-        add_observation(arr, TSS_PARAM_TRIGGER, time_str, (int)trigger);
+        add_observation(arr, origin_code, TSS_PARAM_ACCEL_X, time_str, accel_lsb_to_deg(ax));
+        add_observation(arr, origin_code, TSS_PARAM_ACCEL_Y, time_str, accel_lsb_to_deg(ay));
+        add_observation(arr, origin_code, TSS_PARAM_ACCEL_Z, time_str, accel_lsb_to_deg(az));
+        add_observation(arr, origin_code, TSS_PARAM_GYRO_X, time_str, gyro_lsb_to_dps(gx));
+        add_observation(arr, origin_code, TSS_PARAM_GYRO_Y, time_str, gyro_lsb_to_dps(gy));
+        add_observation(arr, origin_code, TSS_PARAM_GYRO_Z, time_str, gyro_lsb_to_dps(gz));
+        add_observation(arr, origin_code, TSS_PARAM_DEVIATION, time_str, (int)lroundf((float)dev_x100 / 100.0f));
+        add_observation(arr, origin_code, TSS_PARAM_RATE, time_str, (int)lroundf((float)vel_x100 / 100.0f));
+        add_observation(arr, origin_code, TSS_PARAM_STATUS, time_str, (int)status);
+        add_observation(arr, origin_code, TSS_PARAM_TRIGGER, time_str, (int)trigger);
 
         char *body = cJSON_PrintUnformatted(arr);
         cJSON_Delete(arr);
