@@ -21,6 +21,7 @@ static const char *TAG = "GATT_CLIENT";
 #define GATT_ALERT_STATUS_UUID  0xFF02U
 #define GATT_TILT_DATA_UUID     0xFF03U
 #define GATT_RAW_IMU_UUID       0xFF04U
+#define GATT_CONTROL_UUID       0xFF05U
 
 typedef struct {
     bool active;
@@ -29,6 +30,7 @@ typedef struct {
     uint16_t alert_status_val_handle;
     uint16_t tilt_data_val_handle;
     uint16_t raw_imu_val_handle;
+    uint16_t control_val_handle;
     ble_addr_t peer_addr;
     gatt_landslide_data_t data;
 } gatt_session_t;
@@ -256,6 +258,27 @@ static void subscribe_if_found(uint16_t conn_handle, uint16_t val_handle)
     }
 }
 
+//
+static void send_control(uint16_t conn_handle)
+{
+    if (s_session.control_val_handle == 0) {
+        return;
+    }
+    uint8_t payload[2] = {
+        restart_sensor_node ? 1U : 0U,
+        training_mode ? 1U : 0U
+    };
+    int rc = ble_gattc_write_flat(conn_handle, s_session.control_val_handle, payload, sizeof(payload), NULL, NULL);
+    if (rc != 0) {
+        ESP_LOGW(TAG, "Failed to write control characteristic: rc=%d", rc);
+    } else {
+        ESP_LOGI(TAG, "Sent control: restart=%d training_mode=%d", payload[0], payload[1]);
+        if (payload[0] == 1U) {
+            restart_sensor_node = false;   /* one-shot: consumed, don't resend on the next reconnect */
+        }
+    }
+}
+
 static int on_chr_disc(uint16_t conn_handle, const struct ble_gatt_error *error,
                         const struct ble_gatt_chr *chr, void *arg)
 {
@@ -263,24 +286,40 @@ static int on_chr_disc(uint16_t conn_handle, const struct ble_gatt_error *error,
 
     if (error->status == 0 && chr != NULL) {
         uint16_t uuid16 = ble_uuid_u16(&chr->uuid.u);
-        if (uuid16 == GATT_ALERT_STATUS_UUID) {
+        if (uuid16 == GATT_ALERT_STATUS_UUID) 
+        {
             s_session.alert_status_val_handle = chr->val_handle;
-        } else if (uuid16 == GATT_TILT_DATA_UUID) {
+        } 
+        else if (uuid16 == GATT_TILT_DATA_UUID) 
+        {
             s_session.tilt_data_val_handle = chr->val_handle;
-        } else if (uuid16 == GATT_RAW_IMU_UUID) {
+        } 
+        else if (uuid16 == GATT_RAW_IMU_UUID) 
+        {
             s_session.raw_imu_val_handle = chr->val_handle;
         }
-    } else if (error->status != 0 && error->status != BLE_HS_EDONE) {
+        else if (uuid16 == GATT_CONTROL_UUID) 
+        {
+            s_session.control_val_handle = chr->val_handle;
+        }
+    } 
+    else if (error->status != 0 && error->status != BLE_HS_EDONE) 
+    {
         ESP_LOGW(TAG, "Characteristic discovery error: %d", error->status);
-    } else if (error->status == BLE_HS_EDONE) {
+    } 
+    else if (error->status == BLE_HS_EDONE) 
+    {
         /* characteristic discovery finished - subscribe to whichever we found */
         subscribe_if_found(conn_handle, s_session.alert_status_val_handle);
         subscribe_if_found(conn_handle, s_session.tilt_data_val_handle);
         subscribe_if_found(conn_handle, s_session.raw_imu_val_handle);
 
+        send_control(conn_handle);
+
         if (s_session.alert_status_val_handle == 0 &&
             s_session.tilt_data_val_handle == 0 &&
-            s_session.raw_imu_val_handle == 0) {
+            s_session.raw_imu_val_handle == 0) 
+        {
             ESP_LOGW(TAG, "No landslide characteristics found on peer");
         }
     }
@@ -368,10 +407,19 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
     .supervision_timeout = 400,  /* 4 s */
     .min_ce_len = 0, .max_ce_len = 0,
     };
-    int rc = ble_gap_connect(s_own_addr_type, peer_addr, 60000, &cp, gatt_gap_event_cb, NULL);
+ 
+    // int rc = ble_gap_ext_connect(s_own_addr_type, peer_addr, 5000,
+    //                               BLE_GAP_LE_PHY_CODED_MASK,
+    //                               NULL, NULL, &cp,
+    //                               gatt_gap_event_cb, NULL);
+
+    int rc = ble_gap_ext_connect(s_own_addr_type, peer_addr, 60000,
+                              BLE_GAP_LE_PHY_1M_MASK,
+                              &cp, NULL, NULL,
+                              gatt_gap_event_cb, NULL);
 
     if (rc != 0) {
-        ESP_LOGE(TAG, "ble_gap_connect failed: %d", rc);
+        ESP_LOGE(TAG, "ble_gap_ext_connect failed: %d", rc);
         end_session();
     }
     return rc;

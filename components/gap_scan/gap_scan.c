@@ -37,7 +37,7 @@ void gap_scan_start(uint8_t own_addr_type)
         ESP_LOGE(TAG, "ble_gap_ext_disc failed: %d", rc);
         return;
     }
-    ESP_LOGI(TAG, "Scanning started, 1M + Coded PHY (own_addr_type=%d)", own_addr_type);
+    ESP_LOGI(TAG, "Scanning started");
 }
 
 static void log_addr(const ble_addr_t *addr)
@@ -114,7 +114,7 @@ static bool mfg_data_changed(const ble_addr_t *addr, const uint8_t *mfg_data, ui
 
 static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
 {
-    /* ble_gap_ext_disc() reports arrive as BLE_GAP_EVENT_EXT_DISC
+    /* imppp- ble_gap_ext_disc() reports arrive as BLE_GAP_EVENT_EXT_DISC
        (event->ext_disc), not BLE_GAP_EVENT_DISC (event->disc) */
     const uint8_t *adv_data;
     uint8_t adv_data_len;
@@ -156,7 +156,6 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
         return 0; /* nothing new to report from this peer */
     }
 
-    ESP_LOGI(TAG, "EWS adv matched, rssi=%d", adv_rssi);
     log_addr(adv_addr);
 
     /* mfg_data layout: [company_id_lo][company_id_hi][alarm][src][vel_x100][trigger] */

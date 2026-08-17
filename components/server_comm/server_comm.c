@@ -37,6 +37,8 @@ bool training_mode = true; /* for turning on seedlink server and raw data logs *
 
 bool g_gatt_connect_requested = true;
 
+bool restart_sensor_node = true; 
+
 /* TSS post (esp_http_client + TLS) must never run on the nimble_host task, producer (BLE callback) just enqueues, a dedicated
    task with its own stack does the actual blocking network I/O. */
 typedef struct {
