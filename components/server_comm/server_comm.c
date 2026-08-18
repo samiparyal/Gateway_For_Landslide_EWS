@@ -36,7 +36,7 @@ static const char *TAG = "SERVER_COMM";
 static const sensor_id_t s_known_sensors[] = {
     { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234
     { {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, 
-    { {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" },
+    //{ {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" },
     /* add one row per deployed sensor - fill all needed */
 };
 #define NUM_KNOWN_SENSORS (sizeof(s_known_sensors) / sizeof(s_known_sensors[0]))
@@ -59,9 +59,9 @@ const sensor_id_t *server_comm_sensor_id_lookup(const uint8_t addr[6])
 
 bool hide_gatt_logs = false;  
 
-bool training_mode = true; /* for turning on seedlink server and raw data logs */
-
 bool g_gatt_connect_requested = true;
+
+bool training_mode = false; /* for turning on seedlink server and raw data logs */
 
 bool restart_sensor_node = true; 
 
@@ -189,7 +189,9 @@ void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
 {
     if (*idx == 0)
     {
-        /* Nepal std Time = UTC+5:45 */
+        /* Nepal Standard Time = UTC+5:45 - mseed_record() runs gmtime() on
+           this value, so shifting it here keeps the SeedLink/SeisComP side
+           showing correct local time. */
         payload->timestamp = time(NULL) + (5 * 3600 + 45 * 60);
         payload->sequence_number = (*sequence)++;
         strlcpy(payload->station, sensor_id ? sensor_id->station : "DMG37", sizeof(payload->station));
@@ -227,7 +229,8 @@ static void tss_post_task(void *arg)
     }
     esp_http_client_set_header(client, "Content-Type", "application/json");
 
-    while (1) {
+    while (1) 
+    {
         if (xQueueReceive(s_tss_queue, &s, portMAX_DELAY) != pdTRUE) {
             continue;
         }
@@ -238,8 +241,7 @@ static void tss_post_task(void *arg)
         uint8_t status = s.status, trigger = s.trigger;
         const char *origin_code = s.origin_code ? s.origin_code : TSS_ORIGIN_CODE_DEFAULT;
 
-        /* sending in Nepal Standard Time = UTC+5:45 */
-        time_t now = time(NULL) + (5 * 3600 + 45 * 60);
+        time_t now = time(NULL) + (5 * 3600 + 45 * 60); /* Nepal Standard Time = UTC+5:45 */
         struct tm tm_utc;
         gmtime_r(&now, &tm_utc);
         char time_str[24];

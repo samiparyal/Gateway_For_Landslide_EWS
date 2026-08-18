@@ -227,6 +227,14 @@ static void _task_connect(void *vp_arg)
             struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
             setsockopt(g_s_self.sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
+            /* Disable Nagle payload splits into 2 TCP segments,
+               and Nagle holds the trailing small segment back waiting on an
+               ACK that cellular's delayed-ACK timer (~200ms) doesn't send
+               right away. That stall is invisible over WiFi's low RTT but
+               very visible over cellular. */
+            int nodelay = 1;
+            setsockopt(g_s_self.sock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+
             ESP_LOGW(LOG_TAG, "Connected to Seedlink server");
             xSemaphoreGive(g_s_self.sem_connect);
             break;

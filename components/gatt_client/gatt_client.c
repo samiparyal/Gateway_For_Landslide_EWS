@@ -22,7 +22,7 @@ static const char *TAG = "GATT_CLIENT";
 #define GATT_RAW_IMU_UUID       0xFF04U
 #define GATT_CONTROL_UUID       0xFF05U
 
-#define MAX_GATT_SESSIONS 3   /*increase if more sensors used*/
+#define MAX_GATT_SESSIONS 2   /*increase if more sensors used*/
 
 typedef struct {
     bool active;
@@ -40,8 +40,6 @@ typedef struct {
     bool has_last_alert_status;
     uint8_t last_tilt_data[4];
     bool has_last_tilt_data;
-    uint8_t last_raw_imu[17]; /* buf[0..15] (accel/gyro) + buf[24] (hist_burst) */
-    bool has_last_raw_imu;
 
     imu_payload_t seedlink_payload;
     uint16_t seedlink_idx;
@@ -215,38 +213,20 @@ static void handle_raw_imu_notify(gatt_session_t *sess, struct os_mbuf *om)
         seedlink_send(&sess->seedlink_payload, &sess->seedlink_idx, &sess->seedlink_sequence,
                                    sess->sensor_id, sess->data.accel_x, sess->data.accel_y, sess->data.accel_z);
 
-        if (server_comm_known_sensor_count() > 1)
+        if (server_comm_known_sensor_count() <= 1)
         {
-            /* multi-sensor: per-sample CSV print stays off - at 120Hz x 3
-               sensors this saturates the console UART and can stall the
-               NimBLE host task. Raw IMU never logs here, only alert-status
-               changes do. */
-            return;
-        }
-
-        /* single sensor: no UART flood risk, safe to print every sample */
-        printf("%llu,%d,%d,%d,%d,%d,%d\n",
-               (unsigned long long)sess->data.imu_timestamp_ms,
-               sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
-               sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
-        /* fall through to the dedup'd report() below, same as non-training
-           mode - matches original single-sensor behavior. */
-    }
-
-    uint8_t key[17];
-    memcpy(key, buf, 16);  /*accel_x/y/z, gyro_x/y/z*/
-    key[16] = buf[24];  /*timestamp*/
-
-    bool changed = !sess->has_last_raw_imu || memcmp(key, sess->last_raw_imu, sizeof(key)) != 0;
-    if (changed) 
-    {
-        memcpy(sess->last_raw_imu, key, sizeof(key));
-        sess->has_last_raw_imu = true;
-        if (!hide_gatt_logs) 
-        {
-            report(sess);
+            /* single sensor: bench-debug CSV visibility, no UART flood risk */
+            printf("%llu,%d,%d,%d,%d,%d,%d\n",
+                   (unsigned long long)sess->data.imu_timestamp_ms,
+                   sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
+                   sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
         }
     }
+
+    /* raw IMU never triggers report() - accel/gyro noise changes almost
+       every sample (esp. during calibration movement), so a dedup'd report()
+       here just floods the console. Only handle_alert_status_notify() logs,
+       on a real alarm/trigger change. */
 }
 
 static void subscribe_if_found(uint16_t conn_handle, uint16_t val_handle,
@@ -378,18 +358,24 @@ static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg)
     switch (event->type) 
     {
         case BLE_GAP_EVENT_CONNECT:
-            if (event->connect.status == 0) 
+            if (event->connect.status == 0)
             {
                 sess->conn_handle = event->connect.conn_handle;
                 ble_gattc_exchange_mtu(event->connect.conn_handle, NULL, NULL);
                 ble_gattc_disc_svc_by_uuid(event->connect.conn_handle,
                                             BLE_UUID16_DECLARE(GATT_LANDSLIDE_SVC_UUID),
                                             on_svc_disc, sess);
-            } 
-            else 
+            }
+            else
             {
                 ESP_LOGE(TAG, "Connect failed: status=%d", event->connect.status);
                 session_free(sess);
+            }
+            /* connect procedure has resolved (success or fail) - radio is
+               free again, safe to resume scanning for other sensors here.*/
+            if (s_session_end_cb != NULL)
+            {
+                s_session_end_cb();
             }
             return 0;
 
@@ -440,11 +426,12 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
 
     ble_gap_disc_cancel();
 
-    static const struct ble_gap_conn_params cp = 
+    static const struct ble_gap_conn_params cp =
     {
-        .scan_itvl = 0x0010, .scan_window = 0x0010,
-        .itvl_min = 6,
-        .itvl_max = 12,
+        /* 25% duty scan  */
+        .scan_itvl = 0x0060, .scan_window = 0x0015, //scan 15 ms out of every 60 ms
+        .itvl_min = 6,   //Connection interval range, in units of 1.25ms: 6 × 1.25ms = 7.5ms
+        .itvl_max = 12, //12 × 1.25ms = 15ms
         .latency = 0,
         .supervision_timeout = 400,
         .min_ce_len = 0, .max_ce_len = 0,
@@ -455,15 +442,17 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
                               &cp, NULL, NULL,
                               gatt_gap_event_cb, sess);
 
-    if (rc != 0) 
+    if (rc != 0)
     {
         ESP_LOGE(TAG, "ble_gap_ext_connect failed: %d", rc);
         session_free(sess);
-    }
-
-    if (s_session_end_cb != NULL) 
-    {
-        s_session_end_cb();
+        /* connect never actually started - nothing in flight, safe to
+           resume scanning immediately. If rc==0, scanning resumes later, in
+           BLE_GAP_EVENT_CONNECT once the connect procedure resolves. */
+        if (s_session_end_cb != NULL)
+        {
+            s_session_end_cb();
+        }
     }
     return rc;
 }
