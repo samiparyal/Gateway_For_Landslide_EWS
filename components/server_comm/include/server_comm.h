@@ -36,7 +36,7 @@ size_t server_comm_known_sensor_count(void);
 extern bool g_gatt_connect_requested;
 extern bool hide_gatt_logs;
 extern bool training_mode;
-extern bool restart_sensor_node; 
+extern bool restart_sensor_node;
 
 void server_comm_init(void);
 

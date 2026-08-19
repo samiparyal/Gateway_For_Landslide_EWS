@@ -4,11 +4,14 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
-  "idf.currentSetup": "C:\\Users\\Samip\\esp\\v5.5.2\\esp-idf",
+  "idf.currentSetup": "C:\\esp\\v5.5.5\\esp-idf",
   "idf.customExtraVars": {
-    "IDF_TARGET": "esp32s3",
-    "IDF_PATH": "C:\\Users\\Samip\\esp\\v5.5.2\\esp-idf",
-    "IDF_TOOLS_PATH": "C:\\Users\\Samip\\.espressif",
-    "IDF_PYTHON_ENV_PATH": "C:\\Users\\Samip\\.espressif\\python_env\\idf5.5_py3.11_env"
-  }
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=d:\\allprojects\\RTS_PROJ\\s3_gateway_for_landslide\\build"
+  ]
 }

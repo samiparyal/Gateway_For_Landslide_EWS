@@ -48,7 +48,9 @@ typedef struct {
 
 static uint8_t s_own_addr_type;
 static gatt_session_t s_sessions[MAX_GATT_SESSIONS];
-static gatt_session_end_cb_t s_session_end_cb; 
+static gatt_session_end_cb_t s_session_end_cb;
+
+static bool s_control_sent_once = false;
 
 static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg);
 
@@ -249,13 +251,13 @@ static void subscribe_if_found(uint16_t conn_handle, uint16_t val_handle,
 
 static void send_control(uint16_t conn_handle, gatt_session_t *sess)
 {
-    if (sess->control_val_handle == 0) 
+    if (s_control_sent_once || sess->control_val_handle == 0)
     {
         return;
     }
-    uint8_t payload[2] = 
-    {
-        restart_sensor_node ? 1U : 0U,
+    uint8_t payload[2] =
+    { 
+        restart_sensor_node ? (training_mode ? 0U : 1U) : 0U, /*never send restart=1 if training_mode is true, because it will fall back to non-training mode after node restart as default anyway*/
         training_mode ? 1U : 0U
     };
     int rc = ble_gattc_write_flat(conn_handle, sess->control_val_handle, payload, sizeof(payload), NULL, NULL);
@@ -266,9 +268,7 @@ static void send_control(uint16_t conn_handle, gatt_session_t *sess)
     else
     {
         ESP_LOGI(TAG, "Sent control: restart=%d training_mode=%d", payload[0], payload[1]);
-        if (payload[0] == 1U) {
-            restart_sensor_node = false;
-        }
+        s_control_sent_once = true;
     }
 }
 

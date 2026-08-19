@@ -151,7 +151,7 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
     int rc = ble_hs_adv_parse_fields(&fields, adv_data, adv_data_len);
 
     if (rc != 0) {
-        ESP_LOG_BUFFER_HEX(TAG, adv_data, adv_data_len); //malformed adv data
+        //ESP_LOG_BUFFER_HEX(TAG, adv_data, adv_data_len); //malformed adv data - noise from unrelated nearby BLE devices
         return 0;
     }
 

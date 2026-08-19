@@ -61,9 +61,9 @@ bool hide_gatt_logs = false;
 
 bool g_gatt_connect_requested = true;
 
-bool training_mode = false; /* for turning on seedlink server and raw data logs */
+bool training_mode = true; /* for turning on seedlink server and raw data logs */
 
-bool restart_sensor_node = true; 
+bool restart_sensor_node = false; /*keep this false because if node restarts - it fall backs to non-training mode*/
 
 /* TSS post (esp_http_client + TLS) must never run on the nimble_host task, producer (BLE callback) just enqueues, a dedicated
    task with its own stack does the actual blocking network I/O. */
