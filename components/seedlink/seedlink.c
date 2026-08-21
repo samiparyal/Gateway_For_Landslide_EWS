@@ -275,7 +275,9 @@ static void _task(void *vp_arg)
 
         char timestamp[20] = {0};
         _timestamp(s_payload.timestamp, timestamp, sizeof(timestamp));
-        printf("Payload (%s) <%lu>\n", timestamp, s_payload.sequence_number);
+        printf("[%s] Payload (%s) <%lu>\n",
+               s_payload.station[0] ? s_payload.station : "UNKNOWN",
+               timestamp, s_payload.sequence_number);
 
         if (ESP_OK != _payload_send(&s_payload))
         {

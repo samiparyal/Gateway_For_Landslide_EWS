@@ -75,6 +75,11 @@ static void on_gatt_session_end(void)
 
 void app_main(void)
 {
+    esp_log_level_set("esp-x509-crt-bundle", ESP_LOG_WARN);
+    esp_log_level_set("esp_http_client", ESP_LOG_WARN);
+    esp_log_level_set("mbedtls", ESP_LOG_WARN);
+    esp_log_level_set("TRANS_TCP", ESP_LOG_WARN);
+
     //ble controller reads calibration data from nvs on every boot
     esp_err_t nvs_ret = nvs_flash_init();
     if (nvs_ret == ESP_ERR_NVS_NO_FREE_PAGES || nvs_ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {

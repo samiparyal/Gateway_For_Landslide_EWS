@@ -91,6 +91,16 @@ static void session_free(gatt_session_t *sess)
     memset(sess, 0, sizeof(*sess));
 }
 
+static int active_session_count(void)
+{
+    int n = 0;
+    for (int i = 0; i < MAX_GATT_SESSIONS; i++)
+    {
+        if (s_sessions[i].active) n++;
+    }
+    return n;
+}
+
 static uint16_t le16_to_uint16(const uint8_t *p)
 {
     return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
@@ -108,21 +118,28 @@ static uint64_t le64_to_uint64(const uint8_t *p)
 
 static void report(gatt_session_t *sess)
 {
+    if (training_mode) 
+    {
+        hide_gatt_logs = true;
+        return;
+    }
+
     /* JSON build + log disabled */
     // char *json = json_builder_build_gatt(&sess->peer_addr, &sess->data);
     // if (json != NULL)
     // {
     //     server_comm_log_json(json);
-    //     cJSON_free(json);and 
+    //     cJSON_free(json);and
     // }
 
-    ESP_LOGI(TAG, "[%s] alarm=%u trigger=%u dev=%u.%02udeg vel=%u.%02udeg/h accel=(%d,%d,%d) gyro=(%d,%d,%d)",
+   ESP_LOGI(TAG, "[%s] alarm=%u trigger=%u dev=%u.%02udeg vel=%u.%02udeg/h accel=(%d,%d,%d) gyro=(%d,%d,%d)",
              sess->sensor_id ? sess->sensor_id->station : "UNKNOWN",
              sess->data.alarm, sess->data.trigger,
              sess->data.dev_x100 / 100, sess->data.dev_x100 % 100,
              sess->data.vel_x100 / 100, sess->data.vel_x100 % 100,
              sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
              sess->data.gyro_x, sess->data.gyro_y, sess->data.gyro_z);
+
 }
 
 static void handle_alert_status_notify(gatt_session_t *sess, struct os_mbuf *om)
@@ -215,20 +232,14 @@ static void handle_raw_imu_notify(gatt_session_t *sess, struct os_mbuf *om)
         seedlink_send(&sess->seedlink_payload, &sess->seedlink_idx, &sess->seedlink_sequence,
                                    sess->sensor_id, sess->data.accel_x, sess->data.accel_y, sess->data.accel_z);
 
-        if (server_comm_known_sensor_count() <= 1)
-        {
-            /* single sensor: bench-debug CSV visibility, no UART flood risk */
-            printf("%llu,%d,%d,%d,%d,%d,%d\n",
-                   (unsigned long long)sess->data.imu_timestamp_ms,
-                   sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
-                   sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
-        }
+
+        // printf("[%s] %llu,%d,%d,%d,%d,%d,%d\n",
+        //        sess->sensor_id ? sess->sensor_id->station : "UNKNOWN",
+        //        (unsigned long long)sess->data.imu_timestamp_ms,
+        //        sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
+        //        sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
     }
 
-    /* raw IMU never triggers report() - accel/gyro noise changes almost
-       every sample (esp. during calibration movement), so a dedup'd report()
-       here just floods the console. Only handle_alert_status_notify() logs,
-       on a real alarm/trigger change. */
 }
 
 static void subscribe_if_found(uint16_t conn_handle, uint16_t val_handle,
@@ -251,7 +262,7 @@ static void subscribe_if_found(uint16_t conn_handle, uint16_t val_handle,
 
 static void send_control(uint16_t conn_handle, gatt_session_t *sess)
 {
-    if (s_control_sent_once || sess->control_val_handle == 0)
+    if (sess->control_val_handle == 0)
     {
         return;
     }
@@ -268,7 +279,7 @@ static void send_control(uint16_t conn_handle, gatt_session_t *sess)
     else
     {
         ESP_LOGI(TAG, "Sent control: restart=%d training_mode=%d", payload[0], payload[1]);
-        s_control_sent_once = true;
+        //s_control_sent_once = true;
     }
 }
 
@@ -365,17 +376,32 @@ static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg)
                 ble_gattc_disc_svc_by_uuid(event->connect.conn_handle,
                                             BLE_UUID16_DECLARE(GATT_LANDSLIDE_SVC_UUID),
                                             on_svc_disc, sess);
+
+
+                uint8_t phy_mask = training_mode ? BLE_GAP_LE_PHY_1M_MASK : BLE_GAP_LE_PHY_CODED_MASK;
+                uint16_t phy_opts = training_mode ? BLE_GAP_LE_PHY_CODED_ANY : BLE_GAP_LE_PHY_CODED_S8;
+                int phy_rc = ble_gap_set_prefered_le_phy(event->connect.conn_handle,
+                                                          phy_mask, phy_mask, phy_opts);
+                if (phy_rc != 0)
+                {
+                    ESP_LOGW(TAG, "PHY update request failed: rc=%d", phy_rc);
+                }
+
+                if ((size_t)active_session_count() < server_comm_known_sensor_count() &&
+                    s_session_end_cb != NULL)
+                {
+                    s_session_end_cb();
+                }
             }
             else
             {
                 ESP_LOGE(TAG, "Connect failed: status=%d", event->connect.status);
                 session_free(sess);
-            }
-            /* connect procedure has resolved (success or fail) - radio is
-               free again, safe to resume scanning for other sensors here.*/
-            if (s_session_end_cb != NULL)
-            {
-                s_session_end_cb();
+                /* a slot just freed up - always safe/needed to resume here */
+                if (s_session_end_cb != NULL)
+                {
+                    s_session_end_cb();
+                }
             }
             return 0;
 

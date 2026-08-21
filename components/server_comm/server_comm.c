@@ -36,7 +36,7 @@ static const char *TAG = "SERVER_COMM";
 static const sensor_id_t s_known_sensors[] = {
     { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234
     { {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, 
-    //{ {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" },
+   // { {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" },
     /* add one row per deployed sensor - fill all needed */
 };
 #define NUM_KNOWN_SENSORS (sizeof(s_known_sensors) / sizeof(s_known_sensors[0]))
@@ -189,10 +189,7 @@ void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
 {
     if (*idx == 0)
     {
-        /* Nepal Standard Time = UTC+5:45 - mseed_record() runs gmtime() on
-           this value, so shifting it here keeps the SeedLink/SeisComP side
-           showing correct local time. */
-        payload->timestamp = time(NULL) + (5 * 3600 + 45 * 60);
+        payload->timestamp = time(NULL);
         payload->sequence_number = (*sequence)++;
         strlcpy(payload->station, sensor_id ? sensor_id->station : "DMG37", sizeof(payload->station));
     }

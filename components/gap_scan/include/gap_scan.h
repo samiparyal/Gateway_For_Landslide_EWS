@@ -6,7 +6,7 @@
 
 
 /* one gateway sees many sensors; track each peer's last mfg_data separately */
-#define MAX_TRACKED_SENSORS 2
+#define MAX_TRACKED_SENSORS 3
 
 typedef struct {
     ble_addr_t addr;
