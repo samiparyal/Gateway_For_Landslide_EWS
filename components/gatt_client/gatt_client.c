@@ -22,7 +22,7 @@ static const char *TAG = "GATT_CLIENT";
 #define GATT_RAW_IMU_UUID       0xFF04U
 #define GATT_CONTROL_UUID       0xFF05U
 
-#define MAX_GATT_SESSIONS 2   /*increase if more sensors used*/
+#define MAX_GATT_SESSIONS 1   /*increase if more sensors used*/
 
 typedef struct {
     bool active;
@@ -50,9 +50,10 @@ static uint8_t s_own_addr_type;
 static gatt_session_t s_sessions[MAX_GATT_SESSIONS];
 static gatt_session_end_cb_t s_session_end_cb;
 
-static bool s_control_sent_once = false;
+static ble_addr_t s_control_sent_addrs[MAX_GATT_SESSIONS];
+static int s_control_sent_n = 0;
 
-static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg);
+static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg); 
 
 void gatt_client_init(uint8_t own_addr_type)
 {
@@ -233,11 +234,14 @@ static void handle_raw_imu_notify(gatt_session_t *sess, struct os_mbuf *om)
                                    sess->sensor_id, sess->data.accel_x, sess->data.accel_y, sess->data.accel_z);
 
 
-        // printf("[%s] %llu,%d,%d,%d,%d,%d,%d\n",
-        //        sess->sensor_id ? sess->sensor_id->station : "UNKNOWN",
-        //        (unsigned long long)sess->data.imu_timestamp_ms,
-        //        sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
-        //        sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
+        if (show_training_logs)
+        {
+            printf("[%s] %llu,%d,%d,%d,%d,%d,%d\n",
+                sess->sensor_id ? sess->sensor_id->station : "UNKNOWN",
+                (unsigned long long)sess->data.imu_timestamp_ms,
+                sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
+                sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
+        }
     }
 
 }
@@ -266,6 +270,15 @@ static void send_control(uint16_t conn_handle, gatt_session_t *sess)
     {
         return;
     }
+
+    for(int i= 0; i<s_control_sent_n; i++)
+    {
+       if(ble_addr_cmp(&s_control_sent_addrs[i], &sess->peer_addr) == 0)
+       {
+           return; //Control already sent to this sensor, skipping
+       }
+    }
+
     uint8_t payload[2] =
     { 
         restart_sensor_node ? (training_mode ? 0U : 1U) : 0U, /*never send restart=1 if training_mode is true, because it will fall back to non-training mode after node restart as default anyway*/
@@ -280,6 +293,10 @@ static void send_control(uint16_t conn_handle, gatt_session_t *sess)
     {
         ESP_LOGI(TAG, "Sent control: restart=%d training_mode=%d", payload[0], payload[1]);
         //s_control_sent_once = true;
+        if (s_control_sent_n < MAX_GATT_SESSIONS)
+        {
+            s_control_sent_addrs[s_control_sent_n++] = sess->peer_addr;
+        }
     }
 }
 
