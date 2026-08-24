@@ -55,7 +55,7 @@ const sensor_id_t *server_comm_sensor_id_lookup(const uint8_t addr[6])
     }
     return NULL;
 }
-1
+
 bool show_training_logs = true;  /*only turn on for individual sensor to check ODR, otherwise the print for multiple sensors will cause flooding at console*/
 bool hide_gatt_logs = false;  
 bool g_gatt_connect_requested = true;
