@@ -9,7 +9,7 @@ esp_err_t seedlink_init(void);
 QueueHandle_t seedlink_get_queue(void);
 uint32_t seedlink_get_stored(void);
 
-#define IMU_MAX_SAMPLES 114
+#define IMU_MAX_SAMPLES 114 //was 114
 // 512-byte record (fixed by SeedLink) - 56 bytes (48 header + 8 blockette1000) = 456 bytes free
 // 456 / 4 bytes-per-float32-sample = 114 samples max per record
 

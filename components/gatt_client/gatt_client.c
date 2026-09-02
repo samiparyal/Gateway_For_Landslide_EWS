@@ -22,7 +22,7 @@ static const char *TAG = "GATT_CLIENT";
 #define GATT_RAW_IMU_UUID       0xFF04U
 #define GATT_CONTROL_UUID       0xFF05U
 
-#define MAX_GATT_SESSIONS 1   /*increase if more sensors used*/
+#define MAX_GATT_SESSIONS 2   /*increase if more sensors used*/
 
 typedef struct {
     bool active;

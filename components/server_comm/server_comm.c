@@ -35,8 +35,8 @@ static const char *TAG = "SERVER_COMM";
 
 static const sensor_id_t s_known_sensors[] = {
     { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234
-    //{ {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, 
-   // { {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" },
+    { {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, 
+  // { {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" }, //inside the first dabba>
     /* add one row per deployed sensor - fill all needed */
 };
 #define NUM_KNOWN_SENSORS (sizeof(s_known_sensors) / sizeof(s_known_sensors[0]))
@@ -56,7 +56,7 @@ const sensor_id_t *server_comm_sensor_id_lookup(const uint8_t addr[6])
     return NULL;
 }
 
-bool show_training_logs = true;  /*only turn on for individual sensor to check ODR, otherwise the print for multiple sensors will cause flooding at console*/
+bool show_training_logs = false;  /*only turn on for individual sensor to check ODR, otherwise the print for multiple sensors will cause flooding at console*/
 bool hide_gatt_logs = false;  
 bool g_gatt_connect_requested = true;
 bool training_mode = true; /* for turning on seedlink server and raw data logs */
@@ -198,7 +198,10 @@ void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
 
     if (*idx >= IMU_MAX_SAMPLES)
     {
-        xQueueSend(seedlink_get_queue(), payload, 0);
+        if (xQueueSend(seedlink_get_queue(), payload, 0) != pdTRUE)
+        {
+            ESP_LOGE(TAG, "[%s] SeedLink record dropped, queue full", payload->station);
+        }
         *idx = 0;
     }
 }

@@ -21,6 +21,8 @@
 #include "lwip/sockets.h"
 #include "esp_log.h"
 #include <netdb.h>   // for gethostbyname()
+#include <errno.h>
+#include <string.h>
 
 
 /*****************************************************************************************************************
@@ -178,6 +180,12 @@ static esp_err_t _payload_send(imu_payload_t *sp_payload)
             int sent = send(g_s_self.sock, buffer + total_sent, size - total_sent, 0);
             if (sent <= 0)
             {
+                char err[128] = {0};
+                int n = recv(g_s_self.sock, err, sizeof(err) - 1, MSG_DONTWAIT);
+                ESP_LOGE(LOG_TAG, "send failed: rc=%d errno=%d (%s) after %lu/%lu bytes, server said: %s",
+                         sent, errno, strerror(errno),
+                         (unsigned long)total_sent, (unsigned long)size,
+                         (n > 0) ? err : "<nothing>");
                 failed = true;
                 break;
             }
@@ -275,11 +283,21 @@ static void _task(void *vp_arg)
 
         char timestamp[20] = {0};
         _timestamp(s_payload.timestamp, timestamp, sizeof(timestamp));
-        printf("[%s] Payload (%s) <%lu>\n",
-               s_payload.station[0] ? s_payload.station : "UNKNOWN",
-               timestamp, s_payload.sequence_number);
 
-        if (ESP_OK != _payload_send(&s_payload))
+        /* age = seconds from the record's first sample to hitting the socket.
+           Separates gateway-side delay from anything downstream of it. */
+        uint32_t t0 = xTaskGetTickCount();
+        esp_err_t send_rc = _payload_send(&s_payload);
+        uint32_t send_ms = (xTaskGetTickCount() - t0) * portTICK_PERIOD_MS;
+
+        printf("[%s] (%s) <%lu> qd=%u age=%llds send=%lums\n",
+               s_payload.station[0] ? s_payload.station : "UNKNOWN",
+               timestamp, s_payload.sequence_number,
+               (unsigned)uxQueueMessagesWaiting(g_s_self.queue),
+               (long long)(time(NULL) - (time_t)s_payload.timestamp),
+               (unsigned long)send_ms);
+
+        if (ESP_OK != send_rc)
         {
             ESP_LOGE(LOG_TAG, "Failed to send payload: %s", timestamp);
         }
