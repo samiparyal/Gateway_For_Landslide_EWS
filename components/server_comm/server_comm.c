@@ -191,9 +191,9 @@ void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
         strlcpy(payload->station, sensor_id ? sensor_id->station : "DMG37", sizeof(payload->station));
     }
 
-    payload->ax[*idx] = accel_x / 16384.0f;
-    payload->ay[*idx] = accel_y / 16384.0f;
-    payload->az[*idx] = accel_z / 16384.0f;
+    payload->ax[*idx] = accel_x * ACCEL_COUNTS_TO_MS2;
+    payload->ay[*idx] = accel_y * ACCEL_COUNTS_TO_MS2;
+    payload->az[*idx] = accel_z * ACCEL_COUNTS_TO_MS2;
     (*idx)++;
 
     if (*idx >= IMU_MAX_SAMPLES)
