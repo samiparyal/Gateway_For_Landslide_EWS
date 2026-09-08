@@ -553,6 +553,7 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
 
     /*
     to use LE CODED connect / extended connect - uncomment this
+    //THIS IS NOT WORKING FOR ME THOUGH
     int rc = ble_gap_ext_connect(s_own_addr_type, peer_addr, 60000,
                                   BLE_GAP_LE_PHY_CODED_MASK,
                                   NULL,       /* 1M conn params, unused: peer advertises Coded-only */
