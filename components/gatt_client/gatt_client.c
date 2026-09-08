@@ -11,6 +11,7 @@
 #include "json_builder.h"
 #include "seedlink.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
 #include <time.h>
 #include <stdio.h>
 
@@ -54,11 +55,35 @@ static ble_addr_t s_control_sent_addrs[MAX_GATT_SESSIONS];
 static int s_control_sent_n = 0;
 
 static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg); 
+static int active_session_count(void);
+
+#define STARTUP_GRACE_PERIOD_US 120000000 /* 60s to find all the active sensors */
+static esp_timer_handle_t s_grace_timer;
+
+static void grace_timer_cb(void *arg)
+{
+    (void)arg;
+    if ((size_t)active_session_count() < server_comm_known_sensor_count()) {
+        ble_gap_disc_cancel(); /* harmless if already stopped */
+        ESP_LOGI(TAG, "Startup grace period elapsed, connected ones get full airtime now");
+    }
+}
 
 void gatt_client_init(uint8_t own_addr_type)
 {
     s_own_addr_type = own_addr_type;
     memset(s_sessions, 0, sizeof(s_sessions));
+
+    const esp_timer_create_args_t grace_timer_args = 
+    {
+        .callback = grace_timer_cb,
+        .name = "gatt_grace",
+    };
+    
+    if (esp_timer_create(&grace_timer_args, &s_grace_timer) == ESP_OK) 
+    {
+        esp_timer_start_once(s_grace_timer, STARTUP_GRACE_PERIOD_US);
+    }
 }
 
 void gatt_client_set_session_end_cb(gatt_session_end_cb_t cb)
@@ -386,9 +411,19 @@ static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg)
     switch (event->type) 
     {
         case BLE_GAP_EVENT_CONNECT:
+            ESP_LOGW(TAG, "Connect event: status=%d handle=%d", event->connect.status, event->connect.conn_handle);
             if (event->connect.status == 0)
             {
                 sess->conn_handle = event->connect.conn_handle;
+
+                /* Loging the interval actually granted at connect time*/
+                struct ble_gap_conn_desc desc;
+                if (ble_gap_conn_find(event->connect.conn_handle, &desc) == 0)
+                {
+                    ESP_LOGI(TAG, "Conn established: itvl=%.2fms latency=%d timeout=%dms",
+                             desc.conn_itvl * 1.25, desc.conn_latency, desc.supervision_timeout * 10);
+                }
+
                 ble_gattc_exchange_mtu(event->connect.conn_handle, NULL, NULL);
                 ble_gattc_disc_svc_by_uuid(event->connect.conn_handle,
                                             BLE_UUID16_DECLARE(GATT_LANDSLIDE_SVC_UUID),
@@ -429,6 +464,18 @@ static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg)
                 s_session_end_cb();
             }
             return 0;
+
+        case BLE_GAP_EVENT_CONN_UPDATE:
+        {
+            /* Confirms the actual negotiated interval, not just what we requested. */
+            struct ble_gap_conn_desc desc;
+            if (ble_gap_conn_find(event->conn_update.conn_handle, &desc) == 0)
+            {
+                ESP_LOGI(TAG, "Conn update: itvl=%.2fms latency=%d timeout=%dms",
+                         desc.conn_itvl * 1.25, desc.conn_latency, desc.supervision_timeout * 10);
+            }
+            return 0;
+        }
 
         case BLE_GAP_EVENT_NOTIFY_RX:
             if (event->notify_rx.attr_handle == sess->alert_status_val_handle) 
@@ -473,21 +520,42 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
     {
         /* 25% duty scan  */
         .scan_itvl = 0x0060, .scan_window = 0x0015, //scan 15 ms out of every 60 ms
-        .itvl_min = 6,   //Connection interval range, in units of 1.25ms: 6 × 1.25ms = 7.5ms
-        .itvl_max = 12, //12 × 1.25ms = 15ms
+        .itvl_min = 16,  //16 x 1.25ms = 20ms
+        .itvl_max = 16,  //pinned, not a range
         .latency = 0,
         .supervision_timeout = 400,
+        .min_ce_len = 0, .max_ce_len = 10,
+    };
+
+       static const struct ble_gap_conn_params cp_coded =
+    {
+        /* 25% duty scan  */
+        //.scan_itvl = 0x0060, .scan_window = 0x0015, //scan 15 ms out of every 60 ms
+
+        .scan_itvl = 0x0060, .scan_window = 0x0060,   
+        .itvl_min = 40,   /* 50 ms  */
+        .itvl_max = 80,   /* 100 ms */
+        .latency = 0,
+        //.supervision_timeout = 400,
+        .supervision_timeout = 800, //wait more for coded
         .min_ce_len = 0, .max_ce_len = 0,
     };
 
-    int rc = ble_gap_ext_connect(s_own_addr_type, peer_addr, 60000,
-                              BLE_GAP_LE_PHY_1M_MASK,
-                              &cp, NULL, NULL,
-                              gatt_gap_event_cb, sess);
+    ESP_LOGI(TAG, "connect: own_type=%d peer=%02x:%02x:%02x:%02x:%02x:%02x (type %d)",
+             s_own_addr_type,
+             peer_addr->val[5], peer_addr->val[4], peer_addr->val[3],
+             peer_addr->val[2], peer_addr->val[1], peer_addr->val[0], peer_addr->type);
+
+    /* Legacy connect on 1M; Coded S=8 is requested after connection in
+       gatt_gap_event_cb.*/
+    int rc = ble_gap_connect(s_own_addr_type, peer_addr, 60000, &cp, gatt_gap_event_cb, sess);
+    (void)cp_coded;
+
+    ESP_LOGI(TAG, "ble_gap_connect rc=%d", rc);
 
     if (rc != 0)
     {
-        ESP_LOGE(TAG, "ble_gap_ext_connect failed: %d", rc);
+        ESP_LOGE(TAG, "ble_gap_connect failed: %d", rc);
         session_free(sess);
         /* connect never actually started - nothing in flight, safe to
            resume scanning immediately. If rc==0, scanning resumes later, in

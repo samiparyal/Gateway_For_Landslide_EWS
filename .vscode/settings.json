@@ -1,4 +1,5 @@
 {
+  "terminal.integrated.cwd": "${workspaceFolder}",
   "C_Cpp.intelliSenseEngine": "default",
   "idf.extensionActivationMode": "always",
   "idf.openOcdConfigs": [
@@ -12,6 +13,6 @@
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=d:\\allprojects\\RTS_PROJ\\s3_gateway_for_landslide\\build"
+    "--compile-commands-dir=${workspaceFolder}/build"
   ]
 }

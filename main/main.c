@@ -3,6 +3,7 @@
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
+#include "nimble/hci_common.h"
 #include "services/gap/ble_svc_gap.h"
 #include "nvs_flash.h"
 #include "nimble/ble.h"

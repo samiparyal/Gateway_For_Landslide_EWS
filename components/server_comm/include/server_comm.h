@@ -31,6 +31,7 @@ size_t server_comm_known_sensor_count(void);
    linearly with full-scale range: 0.061 mg/LSB per +-2g of range, 35
    mdps/LSB per +-1000dps of range */
 #define ACCEL_G_PER_LSB       (0.000061f * ((float)NODE_ACCEL_FULL_SCALE_G / 2.0f))
+#define ACCEL_COUNTS_TO_MS2 (9.80665f / 16384.0f)
 #define GYRO_DPS_PER_LSB      (0.035f    * ((float)NODE_GYRO_FULL_SCALE_DPS / 1000.0f))
 
 extern bool g_gatt_connect_requested;

@@ -32,11 +32,10 @@ static const char *TAG = "SERVER_COMM";
 #define TSS_PARAM_TRIGGER      "ALARM_T"
 
 
-
 static const sensor_id_t s_known_sensors[] = {
-    { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234
-    { {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, 
-  // { {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" }, //inside the first dabba>
+ { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234
+// { {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, 
+  { {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" }, 
     /* add one row per deployed sensor - fill all needed */
 };
 #define NUM_KNOWN_SENSORS (sizeof(s_known_sensors) / sizeof(s_known_sensors[0]))
@@ -191,9 +190,9 @@ void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
         strlcpy(payload->station, sensor_id ? sensor_id->station : "DMG37", sizeof(payload->station));
     }
 
-    payload->ax[*idx] = accel_x / 16384.0f;
-    payload->ay[*idx] = accel_y / 16384.0f;
-    payload->az[*idx] = accel_z / 16384.0f;
+    payload->ax[*idx] = accel_x * ACCEL_COUNTS_TO_MS2;
+    payload->ay[*idx] = accel_y * ACCEL_COUNTS_TO_MS2;
+    payload->az[*idx] = accel_z * ACCEL_COUNTS_TO_MS2;
     (*idx)++;
 
     if (*idx >= IMU_MAX_SAMPLES)

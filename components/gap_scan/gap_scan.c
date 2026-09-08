@@ -23,11 +23,13 @@ void gap_scan_start(uint8_t own_addr_type)
        scans both PHYs at once */
     struct ble_gap_ext_disc_params uncoded_params = {0};
     uncoded_params.passive = 1;
-    uncoded_params.itvl = uncoded_params.window = 0x0010; // 10ms
+    uncoded_params.itvl = 0x0060;   // 60ms
+    uncoded_params.window = 0x0015; // 13.125ms scanned out of every 60ms
 
     struct ble_gap_ext_disc_params coded_params = {0};
     coded_params.passive = 1;
-    coded_params.itvl = coded_params.window = 0x0010; // 10ms
+    coded_params.itvl = 0x0060;   // 60ms
+    coded_params.window = 0x0015; // 13.125ms scanned out of every 60ms
 
     /* duration=0, period=0 -> scan continuously.
        filter_duplicates=0 (debugging), filter_policy=0 (no accept-list), limited=0 (general discovery) */
@@ -143,6 +145,16 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
         adv_data_len = event->ext_disc.length_data;
         adv_addr     = &event->ext_disc.addr;
         adv_rssi     = event->ext_disc.rssi;
+
+        // ESP_LOGW(TAG, "extdisc prim=%d sec=%d status=%d len=%d rssi=%d props=0x%02x conn=%d scan=%d dir=%d srsp=%d addrtype=%d",
+        //     event->ext_disc.prim_phy, event->ext_disc.sec_phy,
+        //     event->ext_disc.data_status, event->ext_disc.length_data,
+        //     event->ext_disc.rssi, event->ext_disc.props,
+        //     (event->ext_disc.props & BLE_HCI_ADV_CONN_MASK) != 0,
+        //     (event->ext_disc.props & BLE_HCI_ADV_SCAN_MASK) != 0,
+        //     (event->ext_disc.props & BLE_HCI_ADV_DIRECT_MASK) != 0,
+        //     (event->ext_disc.props & BLE_HCI_ADV_SCAN_RSP_MASK) != 0,
+        //     adv_addr->type);
     } else {
         return 0;
     }
@@ -159,7 +171,11 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
         return 0; /* not our device */
     }
 
-    if (g_gatt_connect_requested) {
+    /* only connect to addresses explicitly listed in s_known_sensors*/
+    bool connectable = (event->type == BLE_GAP_EVENT_DISC) ||
+                       (event->ext_disc.props & BLE_HCI_ADV_CONN_MASK);
+    bool is_known = server_comm_sensor_id_lookup(adv_addr->val) != NULL;
+    if (g_gatt_connect_requested && connectable && is_known) {
         gatt_client_connect(adv_addr);
     }
 
