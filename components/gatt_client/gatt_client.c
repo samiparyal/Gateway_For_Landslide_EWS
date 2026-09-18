@@ -11,7 +11,6 @@
 #include "json_builder.h"
 #include "seedlink.h"
 #include "freertos/task.h"
-#include "esp_timer.h"
 #include <time.h>
 #include <stdio.h>
 
@@ -57,14 +56,22 @@ static int s_control_sent_n = 0;
 static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg); 
 static int active_session_count(void);
 
-#define STARTUP_GRACE_PERIOD_US 120000000 /* 60s to find all the active sensors */
-static esp_timer_handle_t s_grace_timer;
+esp_timer_handle_t s_grace_timer;
 
 static void grace_timer_cb(void *arg)
 {
     (void)arg;
-    if ((size_t)active_session_count() < server_comm_known_sensor_count()) {
-        ble_gap_disc_cancel(); /* harmless if already stopped */
+    size_t active = (size_t)active_session_count();
+
+    if (active == 0)
+    {
+        /* nobody connected yet, nothing to hand airtime to, keep scanning */
+        return;
+    }
+
+    if (active < server_comm_known_sensor_count())
+    {
+        ble_gap_disc_cancel();
         ESP_LOGI(TAG, "Startup grace period elapsed, connected ones get full airtime now");
     }
 }
@@ -235,7 +242,8 @@ static void handle_tilt_data_notify(gatt_session_t *sess, struct os_mbuf *om)
 
 static void handle_raw_imu_notify(gatt_session_t *sess, struct os_mbuf *om)
 {
-    uint8_t buf[25];
+    //uint8_t buf[25];
+    uint8_t buf[13];
     if (OS_MBUF_PKTLEN(om) < sizeof(buf)) 
     {
         ESP_LOGW(TAG, "RawImuSample notify too short");
@@ -249,8 +257,9 @@ static void handle_raw_imu_notify(gatt_session_t *sess, struct os_mbuf *om)
     sess->data.gyro_x  = (int16_t)le16_to_uint16(&buf[6]);
     sess->data.gyro_y  = (int16_t)le16_to_uint16(&buf[8]);
     sess->data.gyro_z  = (int16_t)le16_to_uint16(&buf[10]);
-    sess->data.imu_timestamp_ms = le64_to_uint64(&buf[16]);
-    sess->data.imu_is_hist_burst = buf[24];
+    //sess->data.imu_timestamp_ms = le64_to_uint64(&buf[16]);
+    //sess->data.imu_is_hist_burst = buf[24];
+    sess->data.imu_is_hist_burst = buf[12];
     sess->data.has_raw_imu = true;
 
     if (training_mode)
@@ -261,11 +270,17 @@ static void handle_raw_imu_notify(gatt_session_t *sess, struct os_mbuf *om)
 
         if (show_training_logs)
         {
-            printf("[%s] %llu,%d,%d,%d,%d,%d,%d\n",
-                sess->sensor_id ? sess->sensor_id->station : "UNKNOWN",
-                (unsigned long long)sess->data.imu_timestamp_ms,
-                sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
-                sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
+            // printf("[%s] %llu,%d,%d,%d,%d,%d,%d\n",
+            //     sess->sensor_id ? sess->sensor_id->station : "UNKNOWN",
+            //     (unsigned long long)sess->data.imu_timestamp_ms,
+            //     sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
+            //     sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
+
+
+            printf("[%s] %d,%d,%d,%d,%d,%d\n",
+            sess->sensor_id ? sess->sensor_id->station : "UNKNOWN",
+            sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
+            sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
         }
     }
 
@@ -296,12 +311,22 @@ static void send_control(uint16_t conn_handle, gatt_session_t *sess)
         return;
     }
 
+    bool already_sent = false;
     for(int i= 0; i<s_control_sent_n; i++)
     {
        if(ble_addr_cmp(&s_control_sent_addrs[i], &sess->peer_addr) == 0)
        {
-           return; //Control already sent to this sensor, skipping
+            already_sent = true;
+            break; 
        }
+    }
+
+    /* force resend control for sensors reconnected within the grace period */
+    bool force_resend = already_sent && training_mode && esp_timer_is_active(s_grace_timer);
+
+    if (already_sent && !force_resend)
+    {
+        return; //Control already sent to this sensor, skipping
     }
 
     uint8_t payload[2] =
@@ -331,6 +356,13 @@ static int on_last_subscribe_done(uint16_t conn_handle, const struct ble_gatt_er
     (void)error;
     (void)attr;
     send_control(conn_handle, (gatt_session_t *)arg);
+
+    if ((size_t)active_session_count() < server_comm_known_sensor_count() &&
+    s_session_end_cb != NULL)
+    {
+        s_session_end_cb();
+    }
+
     return 0;
 }
 
@@ -430,8 +462,10 @@ static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg)
                                             on_svc_disc, sess);
 
 
-                uint8_t phy_mask = training_mode ? BLE_GAP_LE_PHY_1M_MASK : BLE_GAP_LE_PHY_CODED_MASK;
-                uint16_t phy_opts = training_mode ? BLE_GAP_LE_PHY_CODED_ANY : BLE_GAP_LE_PHY_CODED_S8;
+                // uint8_t phy_mask = training_mode ? BLE_GAP_LE_PHY_1M_MASK : BLE_GAP_LE_PHY_CODED_MASK;
+                // uint16_t phy_opts = training_mode ? BLE_GAP_LE_PHY_CODED_ANY : BLE_GAP_LE_PHY_CODED_S8;
+                uint8_t phy_mask = BLE_GAP_LE_PHY_CODED_MASK;
+                uint16_t phy_opts = BLE_GAP_LE_PHY_CODED_S8;
                 int phy_rc = ble_gap_set_prefered_le_phy(event->connect.conn_handle,
                                                           phy_mask, phy_mask, phy_opts);
                 if (phy_rc != 0)
@@ -439,10 +473,13 @@ static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg)
                     ESP_LOGW(TAG, "PHY update request failed: rc=%d", phy_rc);
                 }
 
-                if ((size_t)active_session_count() < server_comm_known_sensor_count() &&
-                    s_session_end_cb != NULL)
+                /* Default connMaxTxTime on Coded S=8 (2704us, ~30 bytes) splits a
+                   39-byte RawImu notif into two LL packets -> ~2x airtime per
+                   sample. 17040us is the LL max on Coded, free in range terms. */
+                int dl_rc = ble_gap_set_data_len(event->connect.conn_handle, 251, 17040);
+                if (dl_rc != 0)
                 {
-                    s_session_end_cb();
+                    ESP_LOGW(TAG, "set_data_len failed: rc=%d", dl_rc);
                 }
             }
             else
@@ -520,25 +557,28 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
     {
         /* 25% duty scan  */
         .scan_itvl = 0x0060, .scan_window = 0x0015, //scan 15 ms out of every 60 ms
-        .itvl_min = 16,  //16 x 1.25ms = 20ms
-        .itvl_max = 16,  //pinned, not a range
+        .itvl_min = 8,   // 8 x 1.25ms = 10ms
+        .itvl_max = 16,  
         .latency = 0,
         .supervision_timeout = 400,
-        .min_ce_len = 0, .max_ce_len = 10,
+        /* max_ce_len (0.625ms units): 10 = 6.25ms 
+        how much time one connection event is allowed to occupy
+        for higher priority to one sensor do increase max_ce_len more - 16, 
+        */
+        .min_ce_len = 0, .max_ce_len = 15,  //15 is sweet spot - find from trial and error
     };
 
        static const struct ble_gap_conn_params cp_coded =
     {
         /* 25% duty scan  */
         //.scan_itvl = 0x0060, .scan_window = 0x0015, //scan 15 ms out of every 60 ms
-
         .scan_itvl = 0x0060, .scan_window = 0x0060,   
         .itvl_min = 40,   /* 50 ms  */
         .itvl_max = 80,   /* 100 ms */
         .latency = 0,
         //.supervision_timeout = 400,
         .supervision_timeout = 800, //wait more for coded
-        .min_ce_len = 0, .max_ce_len = 0,
+        .min_ce_len = 0, .max_ce_len = 15,
     };
 
     ESP_LOGI(TAG, "connect: own_type=%d peer=%02x:%02x:%02x:%02x:%02x:%02x (type %d)",
@@ -551,17 +591,23 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
     int rc = ble_gap_connect(s_own_addr_type, peer_addr, 60000, &cp, gatt_gap_event_cb, sess);
     (void)cp_coded;
 
-    /*
-    to use LE CODED connect / extended connect - uncomment this
-    //THIS IS NOT WORKING FOR ME THOUGH
-    int rc = ble_gap_ext_connect(s_own_addr_type, peer_addr, 60000,
-                                  BLE_GAP_LE_PHY_CODED_MASK,
-                                  NULL,       /* 1M conn params, unused: peer advertises Coded-only */
-                                  NULL,       /* 2M conn params, unused */
-                                  &cp_coded,  /* Coded conn params 
-                                  gatt_gap_event_cb, sess);
-    (void)cp;
-    */
+    
+    //to use LE CODED connect / extended connect - uncomment this
+    // int rc = ble_gap_ext_connect(s_own_addr_type, peer_addr, 20000,
+    //                               BLE_GAP_LE_PHY_CODED_MASK,
+    //                               NULL,       // 1M conn params, unused: peer advertises Coded-only 
+    //                               NULL,       // 2M conn params, unused 
+    //                               &cp_coded,  // Coded conn params 
+    //                               gatt_gap_event_cb, sess);
+    // (void)cp;
+
+    // int rc = ble_gap_ext_connect(s_own_addr_type, peer_addr, 20000,
+    //                             BLE_GAP_LE_PHY_1M_MASK,   /* TEST: was BLE_GAP_LE_PHY_CODED_MASK */
+    //                             &cp_coded,   /* 1M conn params slot (struct contents are fine as-is) */
+    //                             NULL,        // 2M
+    //                             NULL,        // Coded
+    //                             gatt_gap_event_cb, sess);
+    
 
     ESP_LOGI(TAG, "ble_gap_connect rc=%d", rc);
 

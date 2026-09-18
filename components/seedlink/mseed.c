@@ -208,9 +208,10 @@ uint8_t *mseed_datalink(uint8_t *p_record, mseed_config_t *sp_cfg)
 
     uint8_t preHeader[] = {68, 76, (5 + 63), 87, 82, 73, 84, 69};
 
-
     uint64_t start_time = sp_cfg->start_time;
-    uint64_t duration_s = (sp_cfg->rate_hz > 0) ? (sp_cfg->sample_count / sp_cfg->rate_hz) : 1;
+    uint64_t duration_s = (sp_cfg->rate_hz > 0)
+                            ? (sp_cfg->sample_count + sp_cfg->rate_hz - 1) / sp_cfg->rate_hz  /* ceiling was truncating to 0 */
+                            : 1;
     uint64_t end_time = start_time + duration_s;
 
     sprintf(header, format,

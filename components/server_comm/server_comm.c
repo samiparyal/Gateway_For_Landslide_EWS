@@ -32,10 +32,12 @@ static const char *TAG = "SERVER_COMM";
 #define TSS_PARAM_TRIGGER      "ALARM_T"
 
 
-static const sensor_id_t s_known_sensors[] = {
- { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234
-// { {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, 
-  { {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" }, 
+static const sensor_id_t s_known_sensors[] = 
+{
+  { {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, // node2
+  { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234, reused - IPI test
+ 
+  //{ {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" }, 
     /* add one row per deployed sensor - fill all needed */
 };
 #define NUM_KNOWN_SENSORS (sizeof(s_known_sensors) / sizeof(s_known_sensors[0]))
@@ -56,9 +58,9 @@ const sensor_id_t *server_comm_sensor_id_lookup(const uint8_t addr[6])
 }
 
 bool show_training_logs = false;  /*only turn on for individual sensor to check ODR, otherwise the print for multiple sensors will cause flooding at console*/
-bool hide_gatt_logs = false;  
+bool hide_gatt_logs = true;  
 bool g_gatt_connect_requested = true;
-bool training_mode = true; /* for turning on seedlink server and raw data logs */
+bool training_mode = false; /* for turning on seedlink server and raw data logs */
 bool restart_sensor_node = false; /*keep this false because if node restarts - it fall backs to non-training mode set on node firmware by def*/
 
 /* TSS post (esp_http_client + TLS) must never run on the nimble_host task, producer (BLE callback) just enqueues, a dedicated

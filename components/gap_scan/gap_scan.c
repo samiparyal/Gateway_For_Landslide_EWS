@@ -26,15 +26,21 @@ void gap_scan_start(uint8_t own_addr_type)
     uncoded_params.itvl = 0x0060;   // 60ms
     uncoded_params.window = 0x0015; // 13.125ms scanned out of every 60ms
 
+
     struct ble_gap_ext_disc_params coded_params = {0};
     coded_params.passive = 1;
     coded_params.itvl = 0x0060;   // 60ms
-    coded_params.window = 0x0015; // 13.125ms scanned out of every 60ms
+    coded_params.window = 0x0030; // 30ms
+
 
     /* duration=0, period=0 -> scan continuously.
        filter_duplicates=0 (debugging), filter_policy=0 (no accept-list), limited=0 (general discovery) */
+    // int rc = ble_gap_ext_disc(own_addr_type, 0, 0, 0, 0, 0,
+    //                            NULL, &coded_params, ble_gap_event_cb, NULL);
+
     int rc = ble_gap_ext_disc(own_addr_type, 0, 0, 0, 0, 0,
-                               &uncoded_params, &coded_params, ble_gap_event_cb, NULL);
+                               &uncoded_params, NULL, ble_gap_event_cb, NULL);   /* TEST: 1M instead of Coded */
+
     if (rc != 0) {
         ESP_LOGE(TAG, "ble_gap_ext_disc failed: %d", rc);
         return;

@@ -72,6 +72,9 @@ void ble_app_on_sync_cb(void)
 static void on_gatt_session_end(void)
 {
     gap_scan_start(s_own_addr_type);
+    esp_timer_stop(s_grace_timer); /* no-op if it wasnt running*/
+    esp_timer_start_once(s_grace_timer, STARTUP_GRACE_PERIOD_US);
+    ESP_LOGI(TAG, "Handing full airtime to connected sensors in %d seconds. CONNECT other sensors within this grace period if needed", STARTUP_GRACE_PERIOD_US / 1000000);
 }
 
 void app_main(void)
