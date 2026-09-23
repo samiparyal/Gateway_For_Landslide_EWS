@@ -15,6 +15,7 @@
 #include "wifi_conn.h"
 #include "gsm_conn.h"
 #include "seedlink.h"
+#include "mqtt_cmds.h"
 
 #define TAG "BLE_APP"
 
@@ -98,6 +99,8 @@ void app_main(void)
 #else
     gsm_conn_init();
 #endif
+
+    mqtt_cmds_init();
 
     esp_err_t ret = nimble_port_init();
     if(ret != ESP_OK) {

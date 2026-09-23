@@ -12,6 +12,7 @@
 #include "seedlink.h"
 #include "freertos/task.h"
 #include <time.h>
+#include <sys/time.h>
 #include <stdio.h>
 
 static const char *TAG = "GATT_CLIENT";
@@ -21,6 +22,7 @@ static const char *TAG = "GATT_CLIENT";
 #define GATT_TILT_DATA_UUID     0xFF03U
 #define GATT_RAW_IMU_UUID       0xFF04U
 #define GATT_CONTROL_UUID       0xFF05U
+#define GATT_TIME_SYNC_UUID     0xFF06U
 
 #define MAX_GATT_SESSIONS 2   /*increase if more sensors used*/
 
@@ -32,6 +34,7 @@ typedef struct {
     uint16_t tilt_data_val_handle;
     uint16_t raw_imu_val_handle;
     uint16_t control_val_handle;
+    uint16_t time_sync_val_handle;
     ble_addr_t peer_addr;
     const sensor_id_t *sensor_id;
     gatt_landslide_data_t data;
@@ -208,7 +211,7 @@ static void handle_alert_status_notify(gatt_session_t *sess, struct os_mbuf *om)
                                    sess->data.alarm, sess->data.trigger,
                                    sess->data.dev_x100, sess->data.vel_x100,
                                    sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
-                                   sess->data.gyro_x, sess->data.gyro_y, sess->data.gyro_z);
+                                   sess->data.gyro_x, sess->data.gyro_y, sess->data.gyro_z, sess->data.imu_timestamp_ms);
     }
 }
 
@@ -242,9 +245,10 @@ static void handle_tilt_data_notify(gatt_session_t *sess, struct os_mbuf *om)
 
 static void handle_raw_imu_notify(gatt_session_t *sess, struct os_mbuf *om)
 {
-    //uint8_t buf[25];
-    uint8_t buf[13];
-    if (OS_MBUF_PKTLEN(om) < sizeof(buf)) 
+    /* matches node's RawImuSample_t (packed): ax,ay,az,gx,gy,gz (12B) +
+       timestamp_ms (8B) + is_hist_burst (1B) = 21B */
+    uint8_t buf[21];
+    if (OS_MBUF_PKTLEN(om) < sizeof(buf))
     {
         ESP_LOGW(TAG, "RawImuSample notify too short");
         return;
@@ -257,33 +261,24 @@ static void handle_raw_imu_notify(gatt_session_t *sess, struct os_mbuf *om)
     sess->data.gyro_x  = (int16_t)le16_to_uint16(&buf[6]);
     sess->data.gyro_y  = (int16_t)le16_to_uint16(&buf[8]);
     sess->data.gyro_z  = (int16_t)le16_to_uint16(&buf[10]);
-    //sess->data.imu_timestamp_ms = le64_to_uint64(&buf[16]);
-    //sess->data.imu_is_hist_burst = buf[24];
-    sess->data.imu_is_hist_burst = buf[12];
+    sess->data.imu_timestamp_ms = le64_to_uint64(&buf[12]);
+    sess->data.imu_is_hist_burst = buf[20];
     sess->data.has_raw_imu = true;
 
     if (training_mode)
     {
         seedlink_send(&sess->seedlink_payload, &sess->seedlink_idx, &sess->seedlink_sequence,
-                                   sess->sensor_id, sess->data.accel_x, sess->data.accel_y, sess->data.accel_z);
-
+                                   sess->sensor_id, sess->data.imu_timestamp_ms,
+                                   sess->data.accel_x, sess->data.accel_y, sess->data.accel_z);
 
         if (show_training_logs)
         {
-            // printf("[%s] %llu,%d,%d,%d,%d,%d,%d\n",
-            //     sess->sensor_id ? sess->sensor_id->station : "UNKNOWN",
-            //     (unsigned long long)sess->data.imu_timestamp_ms,
-            //     sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
-            //     sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
-
-
             printf("[%s] %d,%d,%d,%d,%d,%d\n",
             sess->sensor_id ? sess->sensor_id->station : "UNKNOWN",
             sess->data.accel_x, sess->data.accel_y, sess->data.accel_z,
             sess->data.gyro_x,  sess->data.gyro_y,  sess->data.gyro_z);
         }
     }
-
 }
 
 static void subscribe_if_found(uint16_t conn_handle, uint16_t val_handle,
@@ -350,11 +345,56 @@ static void send_control(uint16_t conn_handle, gatt_session_t *sess)
     }
 }
 
+/* CTS-style time sync (write, not spec-compliant CTS read/notify  */
+static void send_time_sync(uint16_t conn_handle, gatt_session_t *sess)
+{
+    if (sess->time_sync_val_handle == 0)
+    {
+        return;
+    }
+
+    /* gettimeofday() instead of time(NULL) */
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    time_t now = tv.tv_sec;
+    struct tm tm_utc;
+    gmtime_r(&now, &tm_utc);
+
+    uint16_t year = (uint16_t)(tm_utc.tm_year + 1900);
+    uint8_t dow = (tm_utc.tm_wday == 0) ? 7U : (uint8_t)tm_utc.tm_wday; /* CTS: 1=Mon..7=Sun */
+    uint8_t fractions256 = (uint8_t)(((uint64_t)tv.tv_usec * 256ULL) / 1000000ULL);
+
+    uint8_t payload[10] =
+    {
+        (uint8_t)(year & 0xFFU), (uint8_t)(year >> 8),
+        (uint8_t)(tm_utc.tm_mon + 1),
+        (uint8_t)tm_utc.tm_mday,
+        (uint8_t)tm_utc.tm_hour,
+        (uint8_t)tm_utc.tm_min,
+        (uint8_t)tm_utc.tm_sec,
+        dow,
+        fractions256,
+        0x02U,  /* adjust_reason: bit1 = external reference time update (SNTP) */
+    };
+
+    int rc = ble_gattc_write_flat(conn_handle, sess->time_sync_val_handle, payload, sizeof(payload), NULL, NULL);
+    if (rc != 0)
+    {
+        ESP_LOGW(TAG, "Failed to write time sync characteristic: rc=%d", rc);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Sent time sync: %04u-%02u-%02u %02u:%02u:%02u UTC",
+                 year, tm_utc.tm_mon + 1, tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
+    }
+}
+
 static int on_last_subscribe_done(uint16_t conn_handle, const struct ble_gatt_error *error,
                                    struct ble_gatt_attr *attr, void *arg)
 {
     (void)error;
     (void)attr;
+    /* time sync now sent earlier, in on_chr_disc()'s BLE_HS_EDONE block */
     send_control(conn_handle, (gatt_session_t *)arg);
 
     if ((size_t)active_session_count() < server_comm_known_sensor_count() &&
@@ -386,17 +426,24 @@ static int on_chr_disc(uint16_t conn_handle, const struct ble_gatt_error *error,
         {
             sess->raw_imu_val_handle = chr->val_handle;
         } 
-        else if (uuid16 == GATT_CONTROL_UUID) 
+        else if (uuid16 == GATT_CONTROL_UUID)
         {
             sess->control_val_handle = chr->val_handle;
         }
-    } 
-    else if (error->status != 0 && error->status != BLE_HS_EDONE) 
+        else if (uuid16 == GATT_TIME_SYNC_UUID)
+        {
+            sess->time_sync_val_handle = chr->val_handle;
+        }
+    }
+    else if (error->status != 0 && error->status != BLE_HS_EDONE)
     {
         ESP_LOGW(TAG, "Characteristic discovery error: %d", error->status);
-    } 
-    else if (error->status == BLE_HS_EDONE) 
+    }
+    else if (error->status == BLE_HS_EDONE)
     {
+        /* fire the time-sync write first, */
+        send_time_sync(conn_handle, sess);
+
         subscribe_if_found(conn_handle, sess->alert_status_val_handle, NULL, NULL);
         subscribe_if_found(conn_handle, sess->tilt_data_val_handle, NULL, NULL);
         subscribe_if_found(conn_handle, sess->raw_imu_val_handle, on_last_subscribe_done, sess);
@@ -465,7 +512,7 @@ static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg)
                 // uint8_t phy_mask = training_mode ? BLE_GAP_LE_PHY_1M_MASK : BLE_GAP_LE_PHY_CODED_MASK;
                 // uint16_t phy_opts = training_mode ? BLE_GAP_LE_PHY_CODED_ANY : BLE_GAP_LE_PHY_CODED_S8;
                 uint8_t phy_mask = BLE_GAP_LE_PHY_CODED_MASK;
-                uint16_t phy_opts = BLE_GAP_LE_PHY_CODED_S8;
+                uint16_t phy_opts = BLE_GAP_LE_PHY_CODED_S2;
                 int phy_rc = ble_gap_set_prefered_le_phy(event->connect.conn_handle,
                                                           phy_mask, phy_mask, phy_opts);
                 if (phy_rc != 0)
@@ -558,17 +605,17 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
         /* 25% duty scan  */
         .scan_itvl = 0x0060, .scan_window = 0x0015, //scan 15 ms out of every 60 ms
         .itvl_min = 8,   // 8 x 1.25ms = 10ms
-        .itvl_max = 16,  
+        .itvl_max = 16,
         .latency = 0,
         .supervision_timeout = 400,
-        /* max_ce_len (0.625ms units): 10 = 6.25ms 
+        /* max_ce_len (0.625ms units): 10 = 6.25ms
         how much time one connection event is allowed to occupy
-        for higher priority to one sensor do increase max_ce_len more - 16, 
+        for higher priority to one sensor do increase max_ce_len more - 16,
         */
         .min_ce_len = 0, .max_ce_len = 15,  //15 is sweet spot - find from trial and error
     };
 
-       static const struct ble_gap_conn_params cp_coded =
+    static const struct ble_gap_conn_params cp_coded =
     {
         /* 25% duty scan  */
         //.scan_itvl = 0x0060, .scan_window = 0x0015, //scan 15 ms out of every 60 ms
@@ -624,4 +671,22 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
         }
     }
     return rc;
+}
+
+
+/*opt: new feat: restart via mqtt cmds*/
+void gatt_client_restart_node(const char *station)
+{
+    bool restart_all = !station || !strcasecmp(station, "all"); //returns 0 if matched so inverted for bool
+
+    if (restart_all)
+    {
+        uint8_t payload[2] = { 1U, training_mode ? 1U : 0U };
+        for (int i = 0; i < MAX_GATT_SESSIONS; i++)
+        {
+            if (s_sessions[i].active && s_sessions[i].control_val_handle != 0)
+                ble_gattc_write_flat(s_sessions[i].conn_handle, s_sessions[i].control_val_handle, payload, sizeof(payload), NULL, NULL);
+        }
+    }
+
 }

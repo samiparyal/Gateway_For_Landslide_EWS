@@ -1,6 +1,7 @@
 #include "server_comm.h"
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
@@ -34,10 +35,10 @@ static const char *TAG = "SERVER_COMM";
 
 static const sensor_id_t s_known_sensors[] = 
 {
-  { {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, // node2
-  { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234, reused - IPI test
+//   { {0x35, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG38", "601" }, // node2
+//   { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234, reused - IPI test
  
-  //{ {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" }, 
+  { {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" }, 
     /* add one row per deployed sensor - fill all needed */
 };
 #define NUM_KNOWN_SENSORS (sizeof(s_known_sensors) / sizeof(s_known_sensors[0]))
@@ -60,7 +61,7 @@ const sensor_id_t *server_comm_sensor_id_lookup(const uint8_t addr[6])
 bool show_training_logs = false;  /*only turn on for individual sensor to check ODR, otherwise the print for multiple sensors will cause flooding at console*/
 bool hide_gatt_logs = true;  
 bool g_gatt_connect_requested = true;
-bool training_mode = false; /* for turning on seedlink server and raw data logs */
+bool training_mode = true; /* for turning on seedlink server and raw data logs */
 bool restart_sensor_node = false; /*keep this false because if node restarts - it fall backs to non-training mode set on node firmware by def*/
 
 /* TSS post (esp_http_client + TLS) must never run on the nimble_host task, producer (BLE callback) just enqueues, a dedicated
@@ -70,6 +71,7 @@ typedef struct {
     uint8_t status, trigger;
     uint16_t dev_x100, vel_x100;
     int16_t ax, ay, az, gx, gy, gz;
+    time_t sample_time;   /* node's own time-synced capture time, resolved at enqueue */
 } tss_snapshot_t;
 
 static QueueHandle_t s_tss_queue = NULL;
@@ -158,13 +160,16 @@ static int gyro_lsb_to_dps(int16_t raw)
 void server_comm_post_snapshot(const char *origin_code, uint8_t status, uint8_t trigger,
                                 uint16_t dev_x100, uint16_t vel_x100,
                                 int16_t ax, int16_t ay, int16_t az,
-                                int16_t gx, int16_t gy, int16_t gz)
+                                int16_t gx, int16_t gy, int16_t gz, uint64_t sample_timestamp_ms)
 {
     if (s_tss_queue == NULL)
     {
         ESP_LOGW(TAG, "TSS post skipped: server_comm_init() not called yet");
         return;
     }
+
+    time_t st = (time_t)(sample_timestamp_ms / 1000);
+    if(st<1700000000) st = time(NULL); /* node hasn't received its time-sync write yet, fall back to gateway time */
 
     tss_snapshot_t item =
     {
@@ -173,6 +178,7 @@ void server_comm_post_snapshot(const char *origin_code, uint8_t status, uint8_t 
         .dev_x100 = dev_x100, .vel_x100 = vel_x100,
         .ax = ax, .ay = ay, .az = az,
         .gx = gx, .gy = gy, .gz = gz,
+        .sample_time = st,
     };
 
     if (xQueueSend(s_tss_queue, &item, 0) != pdTRUE)
@@ -182,13 +188,29 @@ void server_comm_post_snapshot(const char *origin_code, uint8_t status, uint8_t 
 }
 
 void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
-                                const sensor_id_t *sensor_id,
+                                const sensor_id_t *sensor_id, uint64_t sample_timestamp_ms,
                                 int16_t accel_x, int16_t accel_y, int16_t accel_z)
 {
+    /* node-sourced timestamp (from its own DRDY-synced clock) instead of
+       gateway receipt time
+     * sample_timestamp_ms/1000 < 1700000000 means the node hasn't
+       received its time-sync write yet (still raw uptime) - fall back
+       to gateway time rather than writing a bogus ~1970 timestamp. */
+    time_t sample_time = (time_t)(sample_timestamp_ms / 1000);
+    payload->last_timestamp = (sample_time < 1700000000) ? time(NULL) : sample_time;
+
+    /* gateway-side receipt time (ms) - separate from the node's capturetss_snapshot_t
+       timestamp above, to see latency in arrival vs how old the data itself is. */
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t recv_now_ms = (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)(tv.tv_usec / 1000);
+    payload->recv_last_ms = recv_now_ms;
+
     if (*idx == 0)
     {
-        payload->timestamp = time(NULL);
+        payload->timestamp = payload->last_timestamp;
         payload->sequence_number = (*sequence)++;
+        payload->recv_first_ms = recv_now_ms;
         strlcpy(payload->station, sensor_id ? sensor_id->station : "DMG37", sizeof(payload->station));
     }
 
@@ -239,7 +261,7 @@ static void tss_post_task(void *arg)
         uint8_t status = s.status, trigger = s.trigger;
         const char *origin_code = s.origin_code ? s.origin_code : TSS_ORIGIN_CODE_DEFAULT;
 
-        time_t now = time(NULL) + (5 * 3600 + 45 * 60); /* Nepal Standard Time = UTC+5:45 */
+        time_t now = s.sample_time + (5 * 3600 + 45 * 60); /* Nepal Standard Time = UTC+5:45 */
         struct tm tm_utc;
         gmtime_r(&now, &tm_utc);
         char time_str[24];

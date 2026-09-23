@@ -17,7 +17,10 @@ uint32_t seedlink_get_stored(void);
 
 typedef struct {
     uint32_t sequence_number;
-    uint64_t timestamp;
+    uint64_t timestamp;       /* first sample in this record - record start time, used by mseed.c */
+    uint64_t last_timestamp;  /* last sample in this record - used for the age diagnostic only */
+    uint64_t recv_first_ms;   /* gateway wall-clock ms when this record's 1st sample was received */
+    uint64_t recv_last_ms;    /* gateway wall-clock ms when this record's last sample was received */
     char station[6];   /* SEED station code: 5 chars max + null terminator */
     float ax[IMU_MAX_SAMPLES];
     float ay[IMU_MAX_SAMPLES];

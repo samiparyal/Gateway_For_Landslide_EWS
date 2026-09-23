@@ -22,7 +22,7 @@ typedef struct {
     /* RawImuSample characteristic (0xFF04) */
     int16_t accel_x, accel_y, accel_z;
     int16_t gyro_x, gyro_y, gyro_z;
-   // uint64_t imu_timestamp_ms;
+    uint64_t imu_timestamp_ms;   /* node's wall-clock ms, synced via CTS-style time-sync write */
     uint8_t imu_is_hist_burst;
     bool has_raw_imu;
 } gatt_landslide_data_t;
@@ -42,14 +42,7 @@ void gatt_client_init(uint8_t own_addr_type);
 
 void gatt_client_set_session_end_cb(gatt_session_end_cb_t cb);
 
-/*
- * Initiates a GATT connection to peer_addr and, once connected, discovers
- * the landslide service and its three characteristics, then subscribes to
- * notifications on all of them. Every time any of the three notifies, the
- * full current snapshot is built into JSON and sent via server_comm directly
- * - the same way gap_scan reports matched advertisements - logged the same
- * way advertisement data is.
- *
- */
 int gatt_client_connect(const ble_addr_t *peer_addr);
 
+
+void gatt_client_restart_node(const char *station);

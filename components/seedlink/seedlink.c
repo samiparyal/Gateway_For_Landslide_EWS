@@ -284,17 +284,20 @@ static void _task(void *vp_arg)
         char timestamp[20] = {0};
         _timestamp(s_payload.timestamp, timestamp, sizeof(timestamp));
 
-        /* age = seconds from the record's first sample to hitting the socket.
-           Separates gateway-side delay from anything downstream of it. */
+        /* age = seconds from the record's LAST sample (the freshest data in
+           it) to hitting the socket - the first-sample version always baked
+           in ~1s of batch-span (114 samples @ 120Hz) that isn't real delay. */
         uint32_t t0 = xTaskGetTickCount();
         esp_err_t send_rc = _payload_send(&s_payload);
         uint32_t send_ms = (xTaskGetTickCount() - t0) * portTICK_PERIOD_MS;
 
-        printf("[%s] (%s) <%lu> qd=%u age=%llds send=%lums\n",
+        printf("[%s] (%s) <%lu> qd=%u latency=%llds first_sample_age=%llds recv_span=%llums send=%lums\n",
                s_payload.station[0] ? s_payload.station : "UNKNOWN",
                timestamp, s_payload.sequence_number,
                (unsigned)uxQueueMessagesWaiting(g_s_self.queue),
+               (long long)(time(NULL) - (time_t)s_payload.last_timestamp),
                (long long)(time(NULL) - (time_t)s_payload.timestamp),
+               (unsigned long long)(s_payload.recv_last_ms - s_payload.recv_first_ms),
                (unsigned long)send_ms);
 
         if (ESP_OK != send_rc)

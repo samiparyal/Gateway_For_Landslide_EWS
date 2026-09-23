@@ -53,7 +53,8 @@ void server_comm_log_json(const char *json_str);
 void server_comm_post_snapshot(const char *origin_code,uint8_t status, uint8_t trigger,
                                 uint16_t dev_x100, uint16_t vel_x100,
                                 int16_t ax, int16_t ay, int16_t az,
-                                int16_t gx, int16_t gy, int16_t gz);
+                                int16_t gx, int16_t gy, int16_t gz,
+                                uint64_t sample_timestamp_ms);
 
 /*
  * Accumulates one raw accel sample into *payload at *idx, tags it with
@@ -62,5 +63,5 @@ void server_comm_post_snapshot(const char *origin_code,uint8_t status, uint8_t t
  * the SeedLink task and resets *idx to 0 for the next batch.
  */
 void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
-                                const sensor_id_t *sensor_id,
+                                const sensor_id_t *sensor_id, uint64_t sample_timestamp_ms,
                                 int16_t accel_x, int16_t accel_y, int16_t accel_z);
