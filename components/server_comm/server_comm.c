@@ -39,6 +39,7 @@ static const sensor_id_t s_known_sensors[] =
 //   { {0x34, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG37", "600" },   // node1: CFG_PUBLIC_BD_ADDRESS = 0x0008E12A1234, reused - IPI test
  
   { {0x36, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG39", "602" }, 
+  { {0x37, 0x12, 0x2A, 0xE1, 0x08, 0x00}, "DMG40", "603" }
     /* add one row per deployed sensor - fill all needed */
 };
 #define NUM_KNOWN_SENSORS (sizeof(s_known_sensors) / sizeof(s_known_sensors[0]))

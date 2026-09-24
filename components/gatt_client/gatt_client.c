@@ -613,7 +613,7 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
         how much time one connection event is allowed to occupy
         for higher priority to one sensor do increase max_ce_len more - 16,
         */
-        .min_ce_len = 0, .max_ce_len = 15,  //15 is sweet spot - find from trial and error
+        .min_ce_len = 0, .max_ce_len = 14,  //15 is sweet spot - find from trial and error
     };
 
     static const struct ble_gap_conn_params cp_coded =
@@ -626,7 +626,7 @@ int gatt_client_connect(const ble_addr_t *peer_addr)
         .latency = 0,
         //.supervision_timeout = 400,
         .supervision_timeout = 800, //wait more for coded
-        .min_ce_len = 0, .max_ce_len = 15,
+        .min_ce_len = 0, .max_ce_len = 14,
     };
 
     ESP_LOGI(TAG, "connect: own_type=%d peer=%02x:%02x:%02x:%02x:%02x:%02x (type %d)",
