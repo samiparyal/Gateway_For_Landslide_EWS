@@ -138,8 +138,9 @@ static uint32_t _pkt_create(imu_payload_t *sp_payload, uint8_t *p_buffer, uint32
     */
     strlcpy(s_cfg.location, "00",    sizeof(s_cfg.location));
     strlcpy(s_cfg.network,  "NP",    sizeof(s_cfg.network));  
-    s_cfg.start_time = sp_payload->timestamp;
-    s_cfg.time_fract = 0;
+
+    s_cfg.start_time = sp_payload->timestamp_ms / 1000;
+    s_cfg.time_fract = (uint16_t)((sp_payload->timestamp_ms % 1000) * 10);
 
 
     const uint32_t seed_size = 583;
@@ -282,7 +283,7 @@ static void _task(void *vp_arg)
         xSemaphoreGive(g_s_self.sem_connect);
 
         char timestamp[20] = {0};
-        _timestamp(s_payload.timestamp, timestamp, sizeof(timestamp));
+        _timestamp(s_payload.timestamp_ms/1000, timestamp, sizeof(timestamp));
 
         /* age = seconds from the record's LAST sample (the freshest data in
            it) to hitting the socket - the first-sample version always baked
@@ -296,7 +297,7 @@ static void _task(void *vp_arg)
                timestamp, s_payload.sequence_number,
                (unsigned)uxQueueMessagesWaiting(g_s_self.queue),
                (long long)(time(NULL) - (time_t)s_payload.last_timestamp),
-               (long long)(time(NULL) - (time_t)s_payload.timestamp),
+               (long long)(time(NULL) - (time_t)s_payload.timestamp_ms/1000),
                (unsigned long long)(s_payload.recv_last_ms - s_payload.recv_first_ms),
                (unsigned long)send_ms);
 

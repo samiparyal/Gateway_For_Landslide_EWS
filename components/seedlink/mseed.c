@@ -142,7 +142,7 @@ uint8_t *mseed_record(float *p_data, mseed_config_t *sp_cfg)
     uint16_t time_fract = sp_cfg->time_fract;
 
     char sequence[7];
-    sprintf(sequence, "%06ld", sp_cfg->sequence_number);
+    sprintf(sequence, "%06ld", sp_cfg->sequence_number % 1000000UL);
 
     struct tm s_tm;
     memcpy(&s_tm, gmtime((const time_t *)&start_time), sizeof(struct tm)); // start_time is pre-shifted to NPT (UTC+5:45) in seedlink_send() - gmtime() just does the calendar breakdown

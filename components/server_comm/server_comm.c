@@ -196,8 +196,11 @@ void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
      * sample_timestamp_ms/1000 < 1700000000 means the node hasn't
        received its time-sync write yet (still raw uptime) - fall back
        to gateway time rather than writing a bogus ~1970 timestamp. */
+
     time_t sample_time = (time_t)(sample_timestamp_ms / 1000);
-    payload->last_timestamp = (sample_time < 1700000000) ? time(NULL) : sample_time;
+    bool synced = (sample_time >= 1700000000);
+    payload->last_timestamp = synced ? sample_time : time(NULL);
+
 
     /* gateway-side receipt time (ms) - separate from the node's capturetss_snapshot_t
        timestamp above, to see latency in arrival vs how old the data itself is. */
@@ -208,7 +211,9 @@ void seedlink_send(imu_payload_t *payload, uint16_t *idx, uint32_t *sequence,
 
     if (*idx == 0)
     {
-        payload->timestamp = payload->last_timestamp;
+        // payload->timestamp = payload->last_timestamp;
+
+        payload->timestamp_ms = synced ? sample_timestamp_ms : (uint16_t)payload->last_timestamp * 1000ULL;
         payload->sequence_number = (*sequence)++;
         payload->recv_first_ms = recv_now_ms;
         strlcpy(payload->station, sensor_id ? sensor_id->station : "DMG37", sizeof(payload->station));

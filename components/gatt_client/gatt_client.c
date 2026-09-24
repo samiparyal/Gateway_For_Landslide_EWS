@@ -511,6 +511,7 @@ static int gatt_gap_event_cb(struct ble_gap_event *event, void *arg)
 
                 // uint8_t phy_mask = training_mode ? BLE_GAP_LE_PHY_1M_MASK : BLE_GAP_LE_PHY_CODED_MASK;
                 // uint16_t phy_opts = training_mode ? BLE_GAP_LE_PHY_CODED_ANY : BLE_GAP_LE_PHY_CODED_S8;
+
                 uint8_t phy_mask = BLE_GAP_LE_PHY_CODED_MASK;
                 uint16_t phy_opts = BLE_GAP_LE_PHY_CODED_S2;
                 int phy_rc = ble_gap_set_prefered_le_phy(event->connect.conn_handle,

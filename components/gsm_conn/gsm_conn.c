@@ -15,6 +15,10 @@
 #define GSM_UART_PORT           UART_NUM_1 /*router over GPIO43/44 via GPIO matrix*/
 #define GSM_UART_TX_PIN         43 /*COM_UART_RX : EG91 RXD */
 #define GSM_UART_RX_PIN         44 /*COM_UART_TX : EG91 TXD */
+/*
+ESP32 GPIO43 (TX) -------> EG91 RXD
+ESP32 GPIO44 (RX) <------- EG91 TXD
+*/
 #define GSM_UART_RTS_PIN        -1 
 #define GSM_UART_CTS_PIN        -1 
 #define GSM_MODEM_BAUD          115200
@@ -44,12 +48,11 @@ static void gsm_modem_power_on(void)
 
     gpio_config(&io_conf);
 
-    gpio_set_level(GSM_PWRKEY_PIN, 0); /*idle: Q1 off*/
+    gpio_set_level(GSM_PWRKEY_PIN, 0); /*idle: Q1 off*/ /* so eg91 pull up holds - no press */
     vTaskDelay(pdMS_TO_TICKS(100));
-    gpio_set_level(GSM_PWRKEY_PIN, 1); /*800ms: past EG91's ~500ms on and ~650ms off thresholds either way - unambiguous toggle, not just a power-on pulse*/
-    vTaskDelay(pdMS_TO_TICKS(800));
+    gpio_set_level(GSM_PWRKEY_PIN, 1); /*800ms: past EG91's ~500ms on and ~650ms off thresholds either way - toggles from any state: ON or OFF regardless*/
+    vTaskDelay(pdMS_TO_TICKS(800)); /* one toggle - either 500ms is consumed to ON or 650ms is consumed to OFF */
     gpio_set_level(GSM_PWRKEY_PIN, 0); /*idle: Q1 off*/
-
 
     ESP_LOGI(TAG, "PWRKEY pulsed, waiting for modem to boot...");
     vTaskDelay(pdMS_TO_TICKS(5000)); 
